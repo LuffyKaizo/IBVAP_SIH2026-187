@@ -1,0 +1,74 @@
+# ============================================
+# Environment & Secrets
+# ============================================
+.env
+.env.*
+!.env.example
+
+# ============================================
+# Dependencies
+# ============================================
+node_modules/
+frontend/node_modules/
+
+# ============================================
+# Build Output
+# ============================================
+dist/
+frontend/dist/
+build/
+coverage/
+
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# ============================================
+# Debug & Generated
+# ============================================
+debug/
+debug_frames/
+graphify-out/
+-p/
+
+# ============================================
+# Runtime Data
+# ============================================
+backend/ai/data/
+*.log
+server.log
+
+# ============================================
+# Certificates & Keys
+# ============================================
+*.key
+*.pem
+*.crt
+
+# ============================================
+# IDE & OS
+# ============================================
+.idea/
+.vscode/
+*.swp
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# ============================================
+# Generated Media Outputs
+# ============================================
+data/*_output.mp4
+data/surveillance_detection_tracking_output.mp4
+data/detection_output.mp4
+data/tracking_output.mp4
+data/anpr_models/

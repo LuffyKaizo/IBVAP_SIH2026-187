@@ -1,0 +1,21 @@
+# Code Owners
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything
+* @TODO-add-team-username
+
+# Frontend
+frontend/ @TODO-add-frontend-owner
+
+# Backend AI
+backend/ai/ @TODO-add-ai-owner
+
+# Backend Express
+backend/express/ @TODO-add-fullstack-owner
+
+# Infrastructure / CI
+.github/ @TODO-add-devops-owner
+scripts/ @TODO-add-devops-owner
+
+# Documentation
+docs/ @TODO-add-docs-owner

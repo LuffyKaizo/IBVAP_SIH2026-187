@@ -1,0 +1,115 @@
+"""FastAPI dependencies for authentication and authorization."""
+
+from fastapi import Depends, HTTPException, status, Query, WebSocket
+from fastapi.security import OAuth2PasswordBearer
+
+from ai.auth.jwt import decode_access_token
+from ai.auth.models import (
+    Permission, Role, UserContext, ROLE_PERMISSIONS,
+)
+from ai.config import settings
+from ai.db.repositories.user_repo import UserRepository
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
+
+_user_repo = UserRepository()
+
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+) -> UserContext:
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    payload = decode_access_token(token, settings.SECRET_KEY)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = await _user_repo.get_by_id(payload.sub)
+    if user is None or not user.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or disabled",
+        )
+    try:
+        role = Role(user.role)
+    except ValueError:
+        role = Role.VIEWER
+    return UserContext(
+        user_id=user.user_id,
+        email=user.email,
+        role=role,
+        permissions=ROLE_PERMISSIONS.get(role, []),
+    )
+
+
+def require_permission(permission: Permission):
+    async def _check(user: UserContext = Depends(get_current_user)):
+        if permission not in user.permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return user
+    return _check
+
+
+async def get_user_from_token_query(token: str = Query(None)) -> UserContext:
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+    payload = decode_access_token(token, settings.SECRET_KEY)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+    user = await _user_repo.get_by_id(payload.sub)
+    if user is None or not user.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or disabled",
+        )
+    try:
+        role = Role(user.role)
+    except ValueError:
+        role = Role.VIEWER
+    return UserContext(
+        user_id=user.user_id,
+        email=user.email,
+        role=role,
+        permissions=ROLE_PERMISSIONS.get(role, []),
+    )
+
+
+async def verify_ws_token(websocket: WebSocket) -> UserContext:
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Not authenticated")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    payload = decode_access_token(token, settings.SECRET_KEY)
+    if payload is None:
+        await websocket.close(code=4001, reason="Invalid token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    user = await _user_repo.get_by_id(payload.sub)
+    if user is None or not user.enabled:
+        await websocket.close(code=4001, reason="User not found")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    try:
+        role = Role(user.role)
+    except ValueError:
+        role = Role.VIEWER
+    return UserContext(
+        user_id=user.user_id,
+        email=user.email,
+        role=role,
+        permissions=ROLE_PERMISSIONS.get(role, []),
+    )
