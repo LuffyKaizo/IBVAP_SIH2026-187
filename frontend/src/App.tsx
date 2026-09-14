@@ -60,13 +60,14 @@ export const AppInner: React.FC = () => {
   const [hourlyActivity, setHourlyActivity] = useState<HourlySurveillanceActivity[]>(
     Array.from({ length: 24 }, (_, i) => ({
       hour: `${String(i).padStart(2, '0')}:00`,
+      hourNum: i,
       peopleCount: 0,
       vehicleCount: 0,
-      alerts: 0,
+      alertsCount: 0,
       anprHits: 0,
       intrusionBreaches: 0,
       nightActivityIndex: 0,
-      density: 0,
+      totalDensity: 0,
     }))
   );
   const [reports, setReports] = useState<SurveillanceReportItem[]>([]);
