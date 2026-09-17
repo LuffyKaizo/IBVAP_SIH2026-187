@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { verifyToken, requireRole } from './auth';
@@ -22,6 +23,9 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load .env from project root (same file the Python backend uses)
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 // In-memory data stores — start with only camera/zone/config from mockData;
 // alerts, ANPR, reports, suspicious events start EMPTY (real data only)
@@ -65,6 +69,24 @@ async function startServer() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
+      });
+      const data = await resp.json();
+      res.status(resp.status).json(data);
+    } catch (err) {
+      res.status(502).json({ detail: 'Auth service unavailable' });
+    }
+  });
+
+  // Screening-mode auto-login (public — only when SCREENING_MODE=true)
+  app.post('/api/auth/screening-login', express.json(), async (_req, res) => {
+    if (process.env.SCREENING_MODE !== 'true') {
+      return res.status(404).json({ detail: 'Screening mode not enabled' });
+    }
+    try {
+      const aiUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+      const resp = await fetch(`${aiUrl}/auth/screening-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
       });
       const data = await resp.json();
       res.status(resp.status).json(data);
@@ -250,6 +272,26 @@ async function startServer() {
       return res.status(404).json({ error: 'Camera not found: ' + id });
     }
     res.json({ success: true, camera_id: id });
+  });
+
+  // Toggle AI processing for a camera (ADMIN only — proxy to FastAPI)
+  app.post('/api/cameras/:id/ai-toggle', verifyToken, requireRole('ADMIN'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const aiUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+      const resp = await fetch(`${aiUrl}/cameras/${id}/ai-toggle`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(req.headers.authorization ? { Authorization: req.headers.authorization } : {}),
+        },
+        body: JSON.stringify(req.body),
+      });
+      const data = await resp.json();
+      res.status(resp.status).json(data);
+    } catch (err) {
+      res.status(502).json({ detail: 'AI backend unavailable' });
+    }
   });
 
   // Alerts list & filtered query — proxy to FastAPI for real event data

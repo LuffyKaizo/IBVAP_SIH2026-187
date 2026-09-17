@@ -37,7 +37,7 @@ import {
 } from './mockData';
 
 export const AppInner: React.FC = () => {
-  const { isAuthenticated, user, logout, getAuthHeaders } = useAuth();
+  const { isAuthenticated, isInitializing, user, logout, getAuthHeaders } = useAuth();
 
   // Authenticated fetch helper — includes JWT in all API calls
   const authFetch = useCallback(async (url: string, init?: RequestInit): Promise<Response> => {
@@ -266,6 +266,23 @@ export const AppInner: React.FC = () => {
     // Login is now handled by AuthContext
   };
   const handleLogout = () => { logout(); };
+
+  // Screening-mode: show splash while auth initializes, then proceed normally
+  const isScreeningMode = import.meta.env.VITE_SCREENING_MODE === 'true';
+  if (isScreeningMode && isInitializing) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-6 select-none">
+        <div className="flex items-center gap-3">
+          <span className="material-symbols-outlined text-primary text-4xl">shield</span>
+          <h1 className="text-2xl font-bold text-on-surface tracking-tight">IBVAP</h1>
+        </div>
+        <p className="text-sm text-on-surface-variant">Initializing screening session...</p>
+        <div className="w-48 h-1 rounded-full bg-surface-container overflow-hidden">
+          <div className="h-full bg-primary animate-pulse rounded-full" style={{ width: '60%' }} />
+        </div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <LoginView onLogin={handleLogin} />;

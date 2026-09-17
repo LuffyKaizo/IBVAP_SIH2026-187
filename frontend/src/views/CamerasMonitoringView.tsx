@@ -55,9 +55,12 @@ export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
 
   // AI Pipeline integration
   const [aiEnabled, setAiEnabled] = useState(true);
+  const [aiToggleLoading, setAiToggleLoading] = useState(false);
   const aiStream = useAiCameraStream();
   const { token } = useAuth();
-  const isRealAi = aiEnabled && aiStream.isConnected;
+  // Use backend AI state from metadata when available, fallback to local state
+  const backendAiEnabled = aiStream.metadata?.ai_enabled;
+  const isRealAi = (backendAiEnabled !== undefined ? backendAiEnabled : aiEnabled) && aiStream.isConnected;
 
   // Always compute the real video URL for the MJPEG stream
   const AI_BASE = (import.meta.env.VITE_AI_SERVICE_URL || 'http://localhost:8000');
@@ -65,15 +68,13 @@ export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
     ? AI_BASE + '/video/stream/' + currentSelectedId + '?token=' + token
     : '';
 
-  // Connect/disconnect AI pipeline for the selected camera
+  // Always connect WebSocket for the selected camera (AI state is backend-controlled)
   useEffect(() => {
-    if (aiEnabled && currentSelectedId) {
+    if (currentSelectedId) {
       aiStream.connect(currentSelectedId, token || undefined);
-    } else {
-      aiStream.disconnect();
     }
     return () => { aiStream.disconnect(); };
-  }, [aiEnabled, currentSelectedId, token]);
+  }, [currentSelectedId, token]);
 
   // Forward AI metadata to parent for alert processing
   useEffect(() => {
@@ -248,10 +249,34 @@ export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
             <div className="p-3 bg-surface-container-low border-t border-outline-variant flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setAiEnabled(!aiEnabled)}
+                  onClick={async () => {
+                    if (!currentSelectedId || aiToggleLoading) return;
+                    const newState = !aiEnabled;
+                    setAiToggleLoading(true);
+                    try {
+                      const res = await fetch(`/api/cameras/${currentSelectedId}/ai-toggle`, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                        },
+                        body: JSON.stringify({ ai_enabled: newState }),
+                      });
+                      if (res.ok) {
+                        const data = await res.json();
+                        setAiEnabled(data.ai_enabled);
+                      }
+                      // On failure: keep previous state
+                    } catch {
+                      // On network error: keep previous state
+                    } finally {
+                      setAiToggleLoading(false);
+                    }
+                  }}
+                  disabled={aiToggleLoading}
                   className={`px-3 py-1.5 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-colors ${aiEnabled ? 'bg-success-container text-success border-success/30' : 'bg-surface hover:bg-surface-container-high border-outline-variant text-on-surface'}`}
                 >
-                  <span className="material-symbols-outlined text-[14px]">smart_toy</span> AI {aiEnabled ? 'ON' : 'OFF'}
+                  <span className="material-symbols-outlined text-[14px]">smart_toy</span> AI {aiToggleLoading ? '...' : aiEnabled ? 'ON' : 'OFF'}
                 </button>
                 <button
                   onClick={handleTakeSnapshot}

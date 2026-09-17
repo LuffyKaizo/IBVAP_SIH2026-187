@@ -29,6 +29,7 @@ class PipelineState:
         self.camera_name = camera_name
         self.video_connected = False
         self.ai_processing = False
+        self.ai_enabled = True   # per-camera AI control flag (distinct from ai_processing status)
         self.processing_fps = 0.0
         self.source_fps = 0.0
         self.resolution = ""
@@ -62,6 +63,53 @@ class PipelineState:
 
     def update(self, frame, tracking, camera_id, faces=None):
         h, w = frame.shape[:2]  # numpy shape is (height, width, channels)
+
+        # When AI is disabled, store the raw frame but publish empty AI metadata
+        if not self.ai_enabled:
+            now = time.time()
+            metadata = {
+                "camera_id": camera_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source": "real",
+                "frame_width": w,
+                "frame_height": h,
+                "detections": [],
+                "active_tracks": 0,
+                "inference_time_ms": 0,
+                "frame_index": 0,
+                "events": [],
+                "faces": [],
+                "ai_enabled": False,
+            }
+            cap = self._capture
+            if cap is not None:
+                cs = cap.get_status()
+                metadata["camera"] = {
+                    "connected": cs.connected,
+                    "sourceType": cs.source_type,
+                    "source": cs.source,
+                    "status": cs.status,
+                    "fps": cs.fps,
+                    "measuredSourceFps": cs.measured_source_fps,
+                    "processingFps": round(self.processing_fps, 1),
+                    "frameWidth": cs.width,
+                    "frameHeight": cs.height,
+                    "lastFrameTimestamp": cs.last_frame_timestamp,
+                    "reconnectCount": cs.reconnect_count,
+                    "lastError": cs.last_error,
+                }
+            with self.lock:
+                self.latest_frame = frame.copy()
+                self.latest_metadata = metadata
+                self._metadata_timestamp = now
+                self.frames_processed += 1
+                self._fps_samples.append(now)
+                cutoff = now - 2.0
+                self._fps_samples = [t for t in self._fps_samples if t > cutoff]
+                self.processing_fps = len(self._fps_samples) / 2.0
+            return
+
+        # AI enabled — normal detection path
         detections = []
         for obj in tracking.tracked_objects:
             x1, y1, x2, y2 = obj.bbox
@@ -97,6 +145,7 @@ class PipelineState:
             "frame_index": tracking.frame_index,
             "events": [],
             "faces": faces or [],
+            "ai_enabled": True,
         }
         cap = self._capture
         if cap is not None:
@@ -505,6 +554,7 @@ class PipelineState:
                 "camera_id": self.camera_id,
                 "video_connected": self.video_connected,
                 "ai_processing": self.ai_processing,
+                "ai_enabled": self.ai_enabled,
                 "processing_fps": round(self.processing_fps, 1),
                 "source_fps": self.source_fps,
                 "resolution": self.resolution,
@@ -529,6 +579,16 @@ class PipelineState:
             }
         return status
 
+    def set_ai_enabled(self, enabled: bool):
+        """Thread-safe setter for per-camera AI processing control."""
+        with self.lock:
+            self.ai_enabled = enabled
+
+    def get_ai_enabled(self) -> bool:
+        """Thread-safe getter for per-camera AI processing control."""
+        with self.lock:
+            return self.ai_enabled
+
 
 class ProcessingPipeline:
     def __init__(self, camera_id="CAM-01", camera_name=""):
@@ -549,6 +609,7 @@ class ProcessingPipeline:
         self._temporal = None
         self._face_detector = None
         self._face_frame_counter = 0
+        self._was_ai_enabled = True  # tracks previous AI state for reset-on-reenable
         self._capture = None  # live VideoCapture handle (camera-status reporting)
 
     def configure(self, video_source=None, video_source_type=None, model_path=None):
@@ -660,111 +721,129 @@ class ProcessingPipeline:
                     if not cap.open():
                         break
                     continue
-                tracking = self._tracker.track(frame)
+                # Check AI enabled state
+                ai_enabled = self.state.get_ai_enabled()
 
-                # Run context engine (sits between tracking and events)
-                context_contexts = []
-                context_events = []
-                if self._context_engine and self._zones:
-                    context_contexts, context_events = self._context_engine.process_frame(
-                        tracking, self.camera_id, self._zones
-                    )
+                if ai_enabled:
+                    # If transitioning from OFF→ON, reset tracker to clear stale ByteTrack state
+                    if not self._was_ai_enabled:
+                        self._tracker.reset()
+                    self._was_ai_enabled = True
 
-                # Run event engine if configured
-                events = list(context_events)  # start with context events
-                if self._event_engine and self._zones:
-                    events.extend(self._event_engine.process_frame(
-                        tracking, self.camera_id, self._zones
-                    ))
-                # Run behavior analytics
-                behavior_events = []
-                if self._behavior_engine:
-                    behavior_events = self._behavior_engine.process_frame(
-                        tracking, self.camera_id
-                    )
-                    # Convert SecurityEvent objects to dicts for evaluate_suspicious
-                    combined = []
-                    for e in events + behavior_events:
-                        if isinstance(e, dict):
-                            combined.append(e)
+                    tracking = self._tracker.track(frame)
+
+                    # Run context engine (sits between tracking and events)
+                    context_contexts = []
+                    context_events = []
+                    if self._context_engine and self._zones:
+                        context_contexts, context_events = self._context_engine.process_frame(
+                            tracking, self.camera_id, self._zones
+                        )
+
+                    # Run event engine if configured
+                    events = list(context_events)  # start with context events
+                    if self._event_engine and self._zones:
+                        events.extend(self._event_engine.process_frame(
+                            tracking, self.camera_id, self._zones
+                        ))
+                    # Run behavior analytics
+                    behavior_events = []
+                    if self._behavior_engine:
+                        behavior_events = self._behavior_engine.process_frame(
+                            tracking, self.camera_id
+                        )
+                        # Convert SecurityEvent objects to dicts for evaluate_suspicious
+                        combined = []
+                        for e in events + behavior_events:
+                            if isinstance(e, dict):
+                                combined.append(e)
+                            else:
+                                combined.append({
+                                    "event_id": e.event_id, "event_type": e.event_type,
+                                    "severity": e.severity, "camera_id": e.camera_id,
+                                    "zone_id": e.zone_id, "track_id": e.track_id,
+                                    "object_class": e.object_class, "timestamp": e.timestamp,
+                                    "confidence": e.confidence, "bbox": e.bbox,
+                                    "status": e.status, "zone_name": e.zone_name,
+                                })
+                        sus_events = self._behavior_engine.evaluate_suspicious(
+                            combined, self.camera_id
+                        )
+                        behavior_events.extend(sus_events)
+                    events.extend(behavior_events)
+
+                    # Risk enrichment: score each event and enrich with context
+                    from ai.events.behavior import is_night_time
+                    is_night = is_night_time(datetime.now(timezone.utc).hour)
+                    for idx, ev in enumerate(events):
+                        if isinstance(ev, dict):
+                            ev_dict = ev
                         else:
-                            combined.append({
-                                "event_id": e.event_id, "event_type": e.event_type,
-                                "severity": e.severity, "camera_id": e.camera_id,
-                                "zone_id": e.zone_id, "track_id": e.track_id,
-                                "object_class": e.object_class, "timestamp": e.timestamp,
-                                "confidence": e.confidence, "bbox": e.bbox,
-                                "status": e.status, "zone_name": e.zone_name,
-                            })
-                    sus_events = self._behavior_engine.evaluate_suspicious(
-                        combined, self.camera_id
+                            ev_dict = {
+                                "event_id": ev.event_id, "event_type": ev.event_type,
+                                "severity": ev.severity, "camera_id": ev.camera_id,
+                                "zone_id": ev.zone_id, "track_id": ev.track_id,
+                                "object_class": ev.object_class, "timestamp": ev.timestamp,
+                                "confidence": ev.confidence, "bbox": ev.bbox,
+                                "status": ev.status, "zone_name": ev.zone_name,
+                            }
+                            events[idx] = ev_dict
+                        # Find matching track context
+                        track_ctx = self.state._find_track_context(ev_dict.get("track_id", -1), context_contexts)
+                        risk = self._risk_engine.assess(ev_dict, track_context=track_ctx, is_night=is_night)
+                        ev_dict["risk_score"] = risk.risk_score
+                        ev_dict["risk_severity"] = risk.severity
+                        ev_dict["risk_factors"] = risk.risk_factors
+                        # Add context metadata
+                        if track_ctx:
+                            ev_dict["dwell_seconds"] = track_ctx.dwell_seconds
+                            ev_dict["loitering"] = track_ctx.loitering
+                            ev_dict["fence_proximity"] = track_ctx.fence_proximity
+                            ev_dict["direction"] = track_ctx.direction
+                            ev_dict["repeated_entry"] = track_ctx.repeated_entry
+                        # Escalate severity if risk is higher
+                        from ai.risk.engine import RiskEngine as RE
+                        base_sev = ev_dict.get("severity", "MEDIUM")
+                        risk_sev = risk.severity
+                        ev_dict["severity"] = RE.effective_severity(base_sev, risk_sev)
+
+                    # Run ANPR if configured
+                    anpr_results = []
+                    if self._plate_detector and self._ocr_engine and self._temporal and settings.ANPR_ENABLED:
+                        anpr_results = self._run_anpr(tracking, frame)
+                        # Cleanup stale tracks
+                        active_ids = {obj.track_id for obj in tracking.tracked_objects
+                                      if obj.class_name in settings.ANPR_VEHICLE_CLASSES}
+                        self._temporal.cleanup_stale(active_ids, self.camera_id)
+
+                    # Run face DETECTION (interval-controlled, person crops first)
+                    faces_payload = []
+                    if (self._face_detector is not None
+                            and settings.FACE_DETECTION_ENABLED
+                            and self._face_detector.is_available):
+                        self._face_frame_counter += 1
+                        if self._face_frame_counter % max(1, settings.FACE_DETECTION_INTERVAL) == 0:
+                            faces_payload = self._run_face_detection(tracking, frame)
+                    # Always refresh faces in metadata so stale boxes never linger:
+
+                    # Pass raw frame to MJPEG stream; CSS overlay handles bounding boxes
+                    self.state.update(frame, tracking, self.camera_id, faces=faces_payload)
+                    self.state.set_context(context_contexts)
+                    if events:
+                        self.state.set_events(events)
+                    # Attach ANPR results to metadata for WebSocket transport
+                    if anpr_results:
+                        self.state.set_anpr_results(anpr_results)
+                else:
+                    # AI disabled — capture frame only, no inference
+                    self._was_ai_enabled = False
+                    from ai.tracking.tracker import TrackingResult
+                    empty_tracking = TrackingResult(
+                        tracked_objects=[],
+                        active_tracks=0,
+                        frame_index=self._tracker.frame_count if self._tracker else 0,
                     )
-                    behavior_events.extend(sus_events)
-                events.extend(behavior_events)
-
-                # Risk enrichment: score each event and enrich with context
-                from ai.events.behavior import is_night_time
-                is_night = is_night_time(datetime.now(timezone.utc).hour)
-                for idx, ev in enumerate(events):
-                    if isinstance(ev, dict):
-                        ev_dict = ev
-                    else:
-                        ev_dict = {
-                            "event_id": ev.event_id, "event_type": ev.event_type,
-                            "severity": ev.severity, "camera_id": ev.camera_id,
-                            "zone_id": ev.zone_id, "track_id": ev.track_id,
-                            "object_class": ev.object_class, "timestamp": ev.timestamp,
-                            "confidence": ev.confidence, "bbox": ev.bbox,
-                            "status": ev.status, "zone_name": ev.zone_name,
-                        }
-                        events[idx] = ev_dict
-                    # Find matching track context
-                    track_ctx = self.state._find_track_context(ev_dict.get("track_id", -1), context_contexts)
-                    risk = self._risk_engine.assess(ev_dict, track_context=track_ctx, is_night=is_night)
-                    ev_dict["risk_score"] = risk.risk_score
-                    ev_dict["risk_severity"] = risk.severity
-                    ev_dict["risk_factors"] = risk.risk_factors
-                    # Add context metadata
-                    if track_ctx:
-                        ev_dict["dwell_seconds"] = track_ctx.dwell_seconds
-                        ev_dict["loitering"] = track_ctx.loitering
-                        ev_dict["fence_proximity"] = track_ctx.fence_proximity
-                        ev_dict["direction"] = track_ctx.direction
-                        ev_dict["repeated_entry"] = track_ctx.repeated_entry
-                    # Escalate severity if risk is higher
-                    from ai.risk.engine import RiskEngine as RE
-                    base_sev = ev_dict.get("severity", "MEDIUM")
-                    risk_sev = risk.severity
-                    ev_dict["severity"] = RE.effective_severity(base_sev, risk_sev)
-
-                # Run ANPR if configured
-                anpr_results = []
-                if self._plate_detector and self._ocr_engine and self._temporal and settings.ANPR_ENABLED:
-                    anpr_results = self._run_anpr(tracking, frame)
-                    # Cleanup stale tracks
-                    active_ids = {obj.track_id for obj in tracking.tracked_objects
-                                  if obj.class_name in settings.ANPR_VEHICLE_CLASSES}
-                    self._temporal.cleanup_stale(active_ids, self.camera_id)
-
-                # Run face DETECTION (interval-controlled, person crops first)
-                faces_payload = []
-                if (self._face_detector is not None
-                        and settings.FACE_DETECTION_ENABLED
-                        and self._face_detector.is_available):
-                    self._face_frame_counter += 1
-                    if self._face_frame_counter % max(1, settings.FACE_DETECTION_INTERVAL) == 0:
-                        faces_payload = self._run_face_detection(tracking, frame)
-                # Always refresh faces in metadata so stale boxes never linger:
-                # when not run this frame (or none found), [] replaces old boxes.
-
-                # Pass raw frame to MJPEG stream; CSS overlay handles bounding boxes
-                self.state.update(frame, tracking, self.camera_id, faces=faces_payload)
-                self.state.set_context(context_contexts)
-                if events:
-                    self.state.set_events(events)
-                # Attach ANPR results to metadata for WebSocket transport
-                if anpr_results:
-                    self.state.set_anpr_results(anpr_results)
+                    self.state.update(frame, empty_tracking, self.camera_id, faces=[])
                 elapsed = time.time() - loop_start
                 if elapsed < target_interval:
                     time.sleep(target_interval - elapsed)

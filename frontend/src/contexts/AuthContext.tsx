@@ -11,6 +11,7 @@ interface AuthContextType {
   token: string | null;
   user: AuthUser | null;
   isAuthenticated: boolean;
+  isInitializing: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   getAuthHeaders: () => Record<string, string>;
@@ -36,6 +37,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const persisted = loadPersistedAuth();
   const [token, setToken] = useState<string | null>(persisted.token);
   const [user, setUser] = useState<AuthUser | null>(persisted.user);
+  const [isInitializing, setIsInitializing] = useState(
+    import.meta.env.VITE_SCREENING_MODE === 'true' && !persisted.token,
+  );
 
   const isAuthenticated = token !== null && user !== null;
 
@@ -54,7 +58,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }).catch(() => {
         // Network error — keep token, try later
+      }).finally(() => {
+        setIsInitializing(false);
       });
+    } else {
+      setIsInitializing(false);
+    }
+  }, []);
+
+  // Screening-mode auto-login: call server-side endpoint without credentials.
+  // The server generates a real JWT for the actual admin user when SCREENING_MODE=true.
+  useEffect(() => {
+    if (import.meta.env.VITE_SCREENING_MODE === 'true' && !isAuthenticated) {
+      let cancelled = false;
+      fetch('/api/auth/screening-login', { method: 'POST' })
+        .then((res) => {
+          if (!res.ok) return null;
+          return res.json();
+        })
+        .then((data) => {
+          if (cancelled || !data?.access_token || !data?.user) return;
+          setToken(data.access_token);
+          setUser(data.user);
+          localStorage.setItem(TOKEN_KEY, data.access_token);
+          localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+        })
+        .catch(() => { /* screening endpoint unavailable — fall through to LoginView */ })
+        .finally(() => { if (!cancelled) setIsInitializing(false); });
+      return () => { cancelled = true; };
     }
   }, []);
 
@@ -94,7 +125,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [token]);
 
   return (
-    <AuthContext.Provider value={{ token, user, isAuthenticated, login, logout, getAuthHeaders }}>
+    <AuthContext.Provider value={{ token, user, isAuthenticated, isInitializing, login, logout, getAuthHeaders }}>
       {children}
     </AuthContext.Provider>
   );

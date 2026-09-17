@@ -544,6 +544,39 @@ async def sync_camera_footage(
     return await camera_manager.trigger_footage_sync(camera_id)
 
 
+class CameraAiToggleRequest(BaseModel):
+    ai_enabled: bool
+
+
+@app.post("/cameras/{camera_id}/ai-toggle")
+async def toggle_camera_ai(
+    camera_id: str,
+    req: CameraAiToggleRequest,
+    user: UserContext = Depends(require_permission(Permission.CAMERA_CONTROL)),
+):
+    """Toggle AI processing for a specific camera without stopping video capture."""
+    if camera_manager is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Camera manager not initialized"},
+        )
+    pipeline = camera_manager.get_pipeline(camera_id)
+    if pipeline is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Camera not found: %s" % camera_id},
+        )
+    pipeline.set_ai_enabled(req.ai_enabled)
+    status = pipeline.get_status()
+    return {
+        "camera_id": camera_id,
+        "ai_enabled": req.ai_enabled,
+        "video_connected": status.get("video_connected", False),
+        "ai_processing": status.get("ai_processing", False),
+        "running": pipeline.is_running,
+    }
+
+
 @app.get("/cameras/{camera_id}/footage")
 async def get_camera_footage(
     camera_id: str,

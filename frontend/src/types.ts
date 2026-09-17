@@ -221,6 +221,8 @@ export interface AiTrackingMetadata {
   alerts: AiAlert[];
   anpr?: AiAnprRecord[];
   faces?: AiFaceDetection[];
+  /** Whether AI processing is currently enabled on this camera. */
+  ai_enabled?: boolean;
   /** Capture-layer health (RTSP/CCTV), present when the pipeline runs. */
   camera?: AiCameraHealth;
   track_context?: TrackContext[];

@@ -130,6 +130,59 @@ async def logout(_user: UserContext = Depends(get_current_user)):
     return {"success": True, "detail": "Logged out"}
 
 
+@router.post("/screening-login", response_model=TokenResponse)
+async def screening_login():
+    """Screening-mode auto-login: returns a real JWT for the configured admin user.
+
+    Available ONLY when SCREENING_MODE=true (server-side env var).
+    No password required — the endpoint is an opt-in demo/screening mechanism.
+    Uses the ACTUAL admin user from the database; never fabricates an identity.
+    """
+    import os
+    if os.getenv("SCREENING_MODE", "false").lower() != "true":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Screening mode not enabled",
+        )
+
+    admin_email = settings.ADMIN_EMAIL
+    if not admin_email:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ADMIN_EMAIL not configured",
+        )
+
+    user = await _user_repo.get_by_email(admin_email)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Admin user not found for {admin_email}. Run bootstrap first.",
+        )
+    if not user.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Admin user {admin_email} is disabled",
+        )
+
+    token = create_access_token(
+        user_id=user.user_id,
+        email=user.email,
+        role=user.role,
+        secret_key=settings.SECRET_KEY,
+        expires_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+    )
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        user={
+            "user_id": user.user_id,
+            "email": user.email,
+            "full_name": user.full_name or "",
+            "role": user.role,
+        },
+    )
+
+
 async def bootstrap_admin(user_repo: UserRepository):
     count = await user_repo.count()
     if count > 0:

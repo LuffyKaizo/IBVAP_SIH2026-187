@@ -134,3 +134,11 @@ class CameraPipeline:
     def get_frame(self):
         """Get latest annotated frame for MJPEG streaming."""
         return self._pipeline.state.get_latest_frame()
+
+    def set_ai_enabled(self, enabled: bool):
+        """Enable or disable AI processing for this camera without stopping video."""
+        self._pipeline.state.set_ai_enabled(enabled)
+
+    def get_ai_enabled(self) -> bool:
+        """Check whether AI processing is enabled for this camera."""
+        return self._pipeline.state.get_ai_enabled()
