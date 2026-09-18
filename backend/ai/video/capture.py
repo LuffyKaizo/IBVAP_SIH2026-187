@@ -18,6 +18,7 @@ Hardened for IP CCTV / RTSP ingestion:
 """
 
 import cv2
+import os
 import time
 import re as _re
 import numpy as np
@@ -141,8 +142,16 @@ class VideoCapture:
                 idx = int(self.source) if str(self.source).isdigit() else 0
                 self._cap = cv2.VideoCapture(idx)
             else:
-                # MP4 / file
-                self._cap = cv2.VideoCapture(self.source)
+                # MP4 / file — resolve relative paths against the project root
+                # (backend CWD is `backend/`, but video files live at project root `data/`)
+                source_path = self.source
+                if not os.path.isabs(source_path) and not os.path.exists(source_path):
+                    # capture.py is at backend/ai/video/capture.py → 3 levels up = project root
+                    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                    candidate = os.path.join(project_root, source_path)
+                    if os.path.exists(candidate):
+                        source_path = candidate
+                self._cap = cv2.VideoCapture(source_path)
 
             if self._cap is None or not self._cap.isOpened():
                 self._last_error = "open failed (source unavailable or unreachable)"
