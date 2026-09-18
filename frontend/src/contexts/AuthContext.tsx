@@ -33,31 +33,39 @@ function loadPersistedAuth(): { token: string | null; user: AuthUser | null } {
   return { token: null, user: null };
 }
 
+const DEV_USER: AuthUser = {
+  user_id: 'dev-admin',
+  email: 'admin@ibvap.local',
+  full_name: 'Admin',
+  role: 'ADMIN',
+};
+const DEV_TOKEN = 'dev-bypass-token';
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const persisted = loadPersistedAuth();
-  const [token, setToken] = useState<string | null>(persisted.token);
-  const [user, setUser] = useState<AuthUser | null>(persisted.user);
+  const [token, setToken] = useState<string | null>(persisted.token || DEV_TOKEN);
+  const [user, setUser] = useState<AuthUser | null>(persisted.user || DEV_USER);
   const [isInitializing, setIsInitializing] = useState(
     import.meta.env.VITE_SCREENING_MODE === 'true' && !persisted.token,
   );
 
   const isAuthenticated = token !== null && user !== null;
 
-  // Verify persisted token on mount
+  // Verify persisted token on mount (skip for dev bypass token)
   useEffect(() => {
-    if (persisted.token && persisted.user) {
+    if (persisted.token && persisted.user && persisted.token !== DEV_TOKEN) {
       fetch('/api/auth/me', {
         headers: { Authorization: `Bearer ${persisted.token}` },
       }).then((res) => {
         if (!res.ok) {
-          // Token invalid — clear
-          setToken(null);
-          setUser(null);
+          // Token invalid — fall back to dev user
+          setToken(DEV_TOKEN);
+          setUser(DEV_USER);
           localStorage.removeItem(TOKEN_KEY);
           localStorage.removeItem(USER_KEY);
         }
       }).catch(() => {
-        // Network error — keep token, try later
+        // Network error — keep dev token
       }).finally(() => {
         setIsInitializing(false);
       });

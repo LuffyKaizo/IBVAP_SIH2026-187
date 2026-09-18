@@ -5,7 +5,7 @@ interface SettingsViewProps {
   config: SystemSettingsConfig;
   cameras: CameraFeed[];
   onSaveConfig?: (newConfig: SystemSettingsConfig) => void;
-  onAddCamera?: (camera: CameraFeed) => void;
+  onAddCamera?: (camera: { camera_id: string; name: string; source: string; source_type: string; location: string; camera_type?: string }) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ config, cameras, onSaveConfig, onAddCamera }) => {
@@ -14,8 +14,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ config, cameras, onS
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [newCamId, setNewCamId] = useState(`CAM-0${cameras.length + 1}`);
   const [newCamName, setNewCamName] = useState('');
-  const [newCamRtsp, setNewCamRtsp] = useState('');
+  const [newCamSource, setNewCamSource] = useState('');
+  const [newCamSourceType, setNewCamSourceType] = useState('video');
   const [newCamLocation, setNewCamLocation] = useState('');
+  const [newCamType, setNewCamType] = useState('FIXED');
 
   const handleSave = () => {
     onSaveConfig?.(formConfig);
@@ -24,16 +26,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ config, cameras, onS
   };
 
   const handleAddCamera = () => {
-    if (!newCamName.trim() || !newCamRtsp.trim()) {
-      setSaveStatus('Name and RTSP URL required');
+    if (!newCamName.trim() || !newCamSource.trim()) {
+      setSaveStatus('Name and source are required');
       setTimeout(() => setSaveStatus(null), 3000);
       return;
     }
-    const newCamera: CameraFeed = {
-      id: newCamId.trim().toUpperCase(), name: newCamName.trim().toUpperCase(), sector: 'Unassigned', rtspUrl: newCamRtsp.trim(), location: newCamLocation.trim(), coordinates: '0° N, 0° E', fps: 30, resolution: '1080p @ 30fps', bitrate: '4.0 Mbps', status: 'ONLINE', isNightMode: false, ptzSupport: false, videoPosterUrl: '', activeAlertCount: 0, detections: [],
-    };
-    onAddCamera?.(newCamera);
-    setSaveStatus(`Camera ${newCamera.id} registered.`);
+    onAddCamera?.({
+      camera_id: newCamId.trim().toUpperCase(),
+      name: newCamName.trim().toUpperCase(),
+      source: newCamSource.trim(),
+      source_type: newCamSourceType,
+      location: newCamLocation.trim() || 'Unassigned',
+      camera_type: newCamType,
+    });
+    setSaveStatus(`Camera ${newCamId.trim().toUpperCase()} registered.`);
+    setNewCamId(`CAM-0${cameras.length + 2}`);
+    setNewCamName('');
+    setNewCamSource('');
+    setNewCamLocation('');
     setTimeout(() => setSaveStatus(null), 3500);
   };
 
@@ -76,7 +86,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ config, cameras, onS
       {activeTab === 'CAMERAS' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           <div className="lg:col-span-7 bg-surface border border-outline-variant rounded-xl p-5">
-            <span className="text-[11px] font-bold text-on-surface tracking-wide uppercase block mb-3">RTSP Camera Channels ({cameras.length})</span>
+            <span className="text-[11px] font-bold text-on-surface tracking-wide uppercase block mb-3">Registered Cameras ({cameras.length})</span>
             <div className="divide-y divide-outline-variant/40 max-h-[500px] overflow-y-auto">
               {cameras.map((c) => (
                 <div key={c.id} className="py-3 flex items-center justify-between gap-3">
@@ -84,7 +94,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ config, cameras, onS
                     <span className="material-symbols-outlined text-primary text-[18px]">videocam</span>
                     <div>
                       <div className="text-[11px] font-bold text-on-surface">{c.id} — <span className="text-primary">{c.name}</span></div>
-                      <div className="text-[10px] text-on-surface-variant font-mono mt-0.5">{c.rtspUrl}</div>
+                      <div className="text-[10px] text-on-surface-variant font-mono mt-0.5">{c.rtspUrl || 'No source'}</div>
                     </div>
                   </div>
                   <span className={`text-[9px] font-bold px-2 py-0.5 rounded ${c.status === 'ONLINE' ? 'bg-success-container text-success' : 'bg-warning-container text-warning'}`}>{c.status}</span>
@@ -93,12 +103,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ config, cameras, onS
             </div>
           </div>
           <div className="lg:col-span-5 bg-surface border border-outline-variant rounded-xl p-5">
-            <span className="text-[11px] font-bold text-on-surface tracking-wide uppercase block mb-3">Add Camera</span>
+            <span className="text-[11px] font-bold text-on-surface tracking-wide uppercase block mb-3">Register Camera</span>
             <div className="space-y-3 text-[11px]">
-              <div><label className="block text-on-surface-variant font-medium mb-1">ID</label><input type="text" value={newCamId} onChange={(e) => setNewCamId(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 font-mono text-on-surface outline-none" /></div>
-              <div><label className="block text-on-surface-variant font-medium mb-1">NAME</label><input type="text" value={newCamName} onChange={(e) => setNewCamName(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-on-surface outline-none" /></div>
-              <div><label className="block text-on-surface-variant font-medium mb-1">RTSP URL</label><input type="text" value={newCamRtsp} onChange={(e) => setNewCamRtsp(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 font-mono text-primary outline-none" /></div>
-              <div><label className="block text-on-surface-variant font-medium mb-1">LOCATION</label><input type="text" value={newCamLocation} onChange={(e) => setNewCamLocation(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-on-surface outline-none" /></div>
+              <div><label className="block text-on-surface-variant font-medium mb-1">CAMERA ID</label><input type="text" value={newCamId} onChange={(e) => setNewCamId(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 font-mono text-on-surface outline-none" /></div>
+              <div><label className="block text-on-surface-variant font-medium mb-1">NAME</label><input type="text" value={newCamName} onChange={(e) => setNewCamName(e.target.value)} placeholder="e.g. BOP NORTH GATE" className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-on-surface outline-none" /></div>
+              <div><label className="block text-on-surface-variant font-medium mb-1">SOURCE TYPE</label>
+                <select value={newCamSourceType} onChange={(e) => setNewCamSourceType(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-on-surface outline-none">
+                  <option value="video">LOCAL VIDEO (MP4)</option>
+                  <option value="rtsp">RTSP STREAM</option>
+                  <option value="webcam">WEBCAM</option>
+                </select>
+              </div>
+              <div><label className="block text-on-surface-variant font-medium mb-1">{newCamSourceType === 'rtsp' ? 'RTSP URL' : newCamSourceType === 'webcam' ? 'WEBCAM INDEX' : 'VIDEO FILE PATH'}</label>
+                <input type="text" value={newCamSource} onChange={(e) => setNewCamSource(e.target.value)} placeholder={newCamSourceType === 'video' ? './data/cameras/cam-01.mp4' : newCamSourceType === 'rtsp' ? 'rtsp://192.168.1.101:554/live' : '0'} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 font-mono text-primary outline-none" />
+              </div>
+              <div><label className="block text-on-surface-variant font-medium mb-1">LOCATION</label><input type="text" value={newCamLocation} onChange={(e) => setNewCamLocation(e.target.value)} placeholder="e.g. North Outpost Main Gate" className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-on-surface outline-none" /></div>
+              <div><label className="block text-on-surface-variant font-medium mb-1">CAMERA TYPE</label>
+                <select value={newCamType} onChange={(e) => setNewCamType(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-on-surface outline-none">
+                  <option value="FIXED">FIXED</option>
+                  <option value="PTZ">PTZ</option>
+                  <option value="THERMAL">THERMAL</option>
+                  <option value="DAY_NIGHT">DAY/NIGHT</option>
+                </select>
+              </div>
             </div>
             <div className="pt-4 border-t border-outline-variant mt-4">
               <button onClick={handleAddCamera} className="w-full py-2.5 bg-primary hover:bg-primary/90 text-on-primary rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">

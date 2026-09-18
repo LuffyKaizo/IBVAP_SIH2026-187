@@ -239,7 +239,18 @@ export const AppInner: React.FC = () => {
     handleAiAlertAction(id, action);
   };
 
-  const handleAddCamera = (newCam: CameraFeed) => { setCameras((prev) => [newCam, ...prev]); };
+  const handleAddCamera = async (newCam: { camera_id: string; name: string; source: string; source_type: string; location: string; camera_type?: string }) => {
+    try {
+      const res = await authFetch('/api/cameras', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCam),
+      });
+      if (res.ok) {
+        await fetchCameras();
+      }
+    } catch { /* ignore */ }
+  };
   const handleAddAnprRecord = (newRec: AnprRecord) => { setAnprRecords((prev) => [newRec, ...prev]); };
   const handleSaveZone = (newZone: VirtualZone) => {
     setZones((prev) => { const idx = prev.findIndex((z) => z.id === newZone.id); if (idx >= 0) { const c = [...prev]; c[idx] = newZone; return c; } return [newZone, ...prev]; });
