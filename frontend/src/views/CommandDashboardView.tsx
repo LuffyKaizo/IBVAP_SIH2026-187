@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { CameraFeed, BorderAlert, DashboardKpiStats } from '../types';
 import { NavPath } from '../components/Sidebar';
 
@@ -9,6 +10,8 @@ interface CommandDashboardViewProps {
   onNavigate: (path: NavPath) => void;
   onSelectCamera?: (cameraId: string) => void;
   onSelectAlert: (alertId: string) => void;
+  onReplaceCamera?: (cameraId: string, source: string, sourceType: string) => void;
+  onDeleteCamera?: (cameraId: string) => void;
 }
 
 export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
@@ -18,8 +21,21 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
   onNavigate,
   onSelectCamera,
   onSelectAlert,
+  onReplaceCamera,
+  onDeleteCamera,
 }) => {
   const [acknowledgedAlerts, setAcknowledgedAlerts] = useState<Record<string, boolean>>({});
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{ cameraId: string; x: number; y: number } | null>(null);
+
+  // Replace modal state
+  const [replaceModal, setReplaceModal] = useState<{ cameraId: string; currentSource: string; currentSourceType: string } | null>(null);
+  const [replaceSource, setReplaceSource] = useState('');
+  const [replaceSourceType, setReplaceSourceType] = useState('video');
+
+  // Delete confirmation state
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const handleAcknowledge = (alertId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -27,6 +43,52 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
   };
 
   const activeThreatsCount = alerts.filter((a) => !acknowledgedAlerts[a.id] && a.status === 'ACTIVE').length;
+
+  // Context menu handler
+  const handleContextMenu = useCallback((cameraId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ cameraId, x: e.clientX, y: e.clientY });
+  }, []);
+
+  // Close context menu on click outside
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    window.addEventListener('click', handler);
+    return () => window.removeEventListener('click', handler);
+  }, [contextMenu]);
+
+  // Open replace modal
+  const handleOpenReplace = useCallback((cameraId: string) => {
+    const cam = cameras.find((c) => c.id === cameraId);
+    setReplaceModal({ cameraId, currentSource: cam?.rtspUrl || '', currentSourceType: 'video' });
+    setReplaceSource(cam?.rtspUrl || '');
+    setReplaceSourceType('video');
+    setContextMenu(null);
+  }, [cameras]);
+
+  // Submit replace
+  const handleReplaceSubmit = useCallback(() => {
+    if (replaceModal && replaceSource.trim()) {
+      onReplaceCamera?.(replaceModal.cameraId, replaceSource.trim(), replaceSourceType);
+      setReplaceModal(null);
+    }
+  }, [replaceModal, replaceSource, replaceSourceType, onReplaceCamera]);
+
+  // Open delete confirmation
+  const handleOpenDelete = useCallback((cameraId: string) => {
+    setDeleteConfirm(cameraId);
+    setContextMenu(null);
+  }, []);
+
+  // Confirm delete
+  const handleConfirmDelete = useCallback(() => {
+    if (deleteConfirm) {
+      onDeleteCamera?.(deleteConfirm);
+      setDeleteConfirm(null);
+    }
+  }, [deleteConfirm, onDeleteCamera]);
 
   return (
     <div className="flex flex-col w-full p-4 md:p-6 gap-5 select-none max-w-7xl mx-auto">
@@ -144,8 +206,8 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {cameras.slice(0, 4).map((camera) => {
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {cameras.map((camera) => {
               const hasThreat = camera.detections.some((d) => d.isThreat);
               return (
                 <button
@@ -154,6 +216,7 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
                     onSelectCamera?.(camera.id);
                     onNavigate('cameras');
                   }}
+                  onContextMenu={(e) => handleContextMenu(camera.id, e)}
                   className={`bg-surface rounded-xl border overflow-hidden transition-all cursor-pointer text-left group hover:shadow-md ${
                     hasThreat ? 'border-error/30 hover:border-error/50' : 'border-outline-variant hover:border-primary/30'
                   }`}
@@ -400,6 +463,94 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* ═══ CONTEXT MENU ═══ */}
+      {contextMenu && createPortal(
+        <div
+          className="fixed z-[9999]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="bg-surface border border-outline-variant rounded-xl shadow-xl py-1 min-w-[180px] overflow-hidden">
+            <div className="px-3 py-2 border-b border-outline-variant/50 bg-surface-container-low">
+              <span className="text-[11px] font-bold text-primary font-mono">{contextMenu.cameraId}</span>
+            </div>
+            <button onClick={() => { onSelectCamera?.(contextMenu.cameraId); onNavigate('cameras'); setContextMenu(null); }} className="w-full px-3 py-2 text-left text-[11px] text-on-surface hover:bg-surface-container-high flex items-center gap-2 cursor-pointer transition-colors">
+              <span className="material-symbols-outlined text-[14px]">open_in_new</span> Open Camera
+            </button>
+            <button onClick={() => { onSelectCamera?.(contextMenu.cameraId); onNavigate('cameras'); setContextMenu(null); }} className="w-full px-3 py-2 text-left text-[11px] text-on-surface hover:bg-surface-container-high flex items-center gap-2 cursor-pointer transition-colors">
+              <span className="material-symbols-outlined text-[14px]">fullscreen</span> Fullscreen
+            </button>
+            <div className="border-t border-outline-variant/50 my-0.5" />
+            <button onClick={() => handleOpenReplace(contextMenu.cameraId)} className="w-full px-3 py-2 text-left text-[11px] text-on-surface hover:bg-surface-container-high flex items-center gap-2 cursor-pointer transition-colors">
+              <span className="material-symbols-outlined text-[14px]">swap_horiz</span> Replace Camera
+            </button>
+            <button onClick={() => handleOpenDelete(contextMenu.cameraId)} className="w-full px-3 py-2 text-left text-[11px] text-error hover:bg-error-container/30 flex items-center gap-2 cursor-pointer transition-colors">
+              <span className="material-symbols-outlined text-[14px]">delete</span> Delete Camera
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ═══ REPLACE CAMERA MODAL ═══ */}
+      {replaceModal && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-on-surface/50 backdrop-blur-sm" onClick={() => setReplaceModal(null)}>
+          <div className="bg-surface border border-outline-variant rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-outline-variant bg-surface-container-low">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[18px]">swap_horiz</span>
+                <h3 className="text-[13px] font-bold text-on-surface">Replace Camera Source</h3>
+              </div>
+              <p className="text-[11px] text-on-surface-variant mt-1 font-mono">{replaceModal.cameraId}</p>
+            </div>
+            <div className="px-5 py-4 space-y-3 text-[11px]">
+              <div>
+                <label className="block text-on-surface-variant font-medium mb-1">SOURCE TYPE</label>
+                <select value={replaceSourceType} onChange={(e) => setReplaceSourceType(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-on-surface outline-none">
+                  <option value="video">LOCAL VIDEO (MP4)</option>
+                  <option value="rtsp">RTSP STREAM</option>
+                  <option value="webcam">WEBCAM</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-on-surface-variant font-medium mb-1">{replaceSourceType === 'rtsp' ? 'RTSP URL' : replaceSourceType === 'webcam' ? 'WEBCAM INDEX' : 'VIDEO FILE PATH'}</label>
+                <input type="text" value={replaceSource} onChange={(e) => setReplaceSource(e.target.value)} placeholder={replaceSourceType === 'video' ? './data/cameras/cam-01.mp4' : replaceSourceType === 'rtsp' ? 'rtsp://192.168.1.101:554/live' : '0'} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 font-mono text-primary outline-none" />
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-outline-variant flex items-center justify-end gap-2">
+              <button onClick={() => setReplaceModal(null)} className="px-4 py-2 text-[11px] font-semibold text-on-surface-variant hover:text-on-surface rounded-lg cursor-pointer transition-colors">Cancel</button>
+              <button onClick={handleReplaceSubmit} disabled={!replaceSource.trim()} className="px-4 py-2 bg-primary hover:bg-primary/90 text-on-primary rounded-lg text-[11px] font-bold cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Replace Source</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ═══ DELETE CONFIRMATION MODAL ═══ */}
+      {deleteConfirm && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-on-surface/50 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)}>
+          <div className="bg-surface border border-outline-variant rounded-xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-outline-variant bg-error-container/20">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-error text-[18px]">delete</span>
+                <h3 className="text-[13px] font-bold text-on-surface">Delete Camera</h3>
+              </div>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-[12px] text-on-surface">
+                Delete <span className="font-mono font-bold text-error">{deleteConfirm}</span>?
+              </p>
+              <p className="text-[11px] text-on-surface-variant mt-1">This will remove the camera from monitoring.</p>
+            </div>
+            <div className="px-5 py-3 border-t border-outline-variant flex items-center justify-end gap-2">
+              <button onClick={() => setDeleteConfirm(null)} className="px-4 py-2 text-[11px] font-semibold text-on-surface-variant hover:text-on-surface rounded-lg cursor-pointer transition-colors">Cancel</button>
+              <button onClick={handleConfirmDelete} className="px-4 py-2 bg-error hover:bg-error/90 text-on-error rounded-lg text-[11px] font-bold cursor-pointer transition-colors">Delete Camera</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

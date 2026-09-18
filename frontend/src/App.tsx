@@ -251,6 +251,30 @@ export const AppInner: React.FC = () => {
       }
     } catch { /* ignore */ }
   };
+
+  const handleReplaceCamera = async (cameraId: string, source: string, sourceType: string) => {
+    try {
+      const res = await authFetch(`/api/cameras/${cameraId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source, source_type: sourceType }),
+      });
+      if (res.ok) {
+        await fetchCameras();
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleDeleteCamera = async (cameraId: string) => {
+    try {
+      const res = await authFetch(`/api/cameras/${cameraId}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        await fetchCameras();
+      }
+    } catch { /* ignore */ }
+  };
   const handleAddAnprRecord = (newRec: AnprRecord) => { setAnprRecords((prev) => [newRec, ...prev]); };
   const handleSaveZone = (newZone: VirtualZone) => {
     setZones((prev) => { const idx = prev.findIndex((z) => z.id === newZone.id); if (idx >= 0) { const c = [...prev]; c[idx] = newZone; return c; } return [newZone, ...prev]; });
@@ -331,6 +355,8 @@ export const AppInner: React.FC = () => {
             onNavigate={setCurrentPath}
             onSelectCamera={handleSelectCamera}
             onSelectAlert={handleSelectAlert}
+            onReplaceCamera={handleReplaceCamera}
+            onDeleteCamera={handleDeleteCamera}
           />
         )}
         {currentPath === 'cameras' && (
@@ -354,7 +380,7 @@ export const AppInner: React.FC = () => {
         {currentPath === 'analytics' && <AnalyticsView hourlyData={hourlyActivity} />}
         {currentPath === 'reports' && <ReportsView reports={reports} onGenerateReport={handleGenerateReport} />}
         {currentPath === 'settings' && (
-          <SettingsView config={systemConfig} cameras={cameras} onSaveConfig={setSystemConfig} onAddCamera={handleAddCamera} />
+          <SettingsView config={systemConfig} cameras={cameras} onSaveConfig={setSystemConfig} onAddCamera={handleAddCamera} onReplaceCamera={handleReplaceCamera} onDeleteCamera={handleDeleteCamera} />
         )}
       </main>
 

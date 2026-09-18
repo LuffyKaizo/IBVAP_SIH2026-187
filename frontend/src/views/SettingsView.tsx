@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { SystemSettingsConfig, CameraFeed } from '../types';
 
 interface SettingsViewProps {
@@ -6,9 +7,11 @@ interface SettingsViewProps {
   cameras: CameraFeed[];
   onSaveConfig?: (newConfig: SystemSettingsConfig) => void;
   onAddCamera?: (camera: { camera_id: string; name: string; source: string; source_type: string; location: string; camera_type?: string }) => void;
+  onReplaceCamera?: (cameraId: string, source: string, sourceType: string) => void;
+  onDeleteCamera?: (cameraId: string) => void;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ config, cameras, onSaveConfig, onAddCamera }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ config, cameras, onSaveConfig, onAddCamera, onReplaceCamera, onDeleteCamera }) => {
   const [formConfig, setFormConfig] = useState<SystemSettingsConfig>(config);
   const [activeTab, setActiveTab] = useState<'CAMERAS' | 'AI_CONFIG' | 'ALERT_RULES' | 'API_INTEGRATION' | 'SYSTEM_HEALTH'>('CAMERAS');
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
@@ -18,6 +21,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ config, cameras, onS
   const [newCamSourceType, setNewCamSourceType] = useState('video');
   const [newCamLocation, setNewCamLocation] = useState('');
   const [newCamType, setNewCamType] = useState('FIXED');
+
+  // Replace modal state
+  const [replaceModal, setReplaceModal] = useState<{ cameraId: string; currentSource: string } | null>(null);
+  const [replaceSource, setReplaceSource] = useState('');
+  const [replaceSourceType, setReplaceSourceType] = useState('video');
+
+  // Delete confirmation state
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const handleSave = () => {
     onSaveConfig?.(formConfig);
@@ -97,7 +108,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ config, cameras, onS
                       <div className="text-[10px] text-on-surface-variant font-mono mt-0.5">{c.rtspUrl || 'No source'}</div>
                     </div>
                   </div>
-                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded ${c.status === 'ONLINE' ? 'bg-success-container text-success' : 'bg-warning-container text-warning'}`}>{c.status}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded ${c.status === 'ONLINE' ? 'bg-success-container text-success' : 'bg-warning-container text-warning'}`}>{c.status}</span>
+                    <button onClick={() => { setReplaceModal({ cameraId: c.id, currentSource: c.rtspUrl || '' }); setReplaceSource(c.rtspUrl || ''); setReplaceSourceType('video'); }} className="px-2 py-1 text-[9px] font-bold bg-surface-container-high hover:bg-primary/20 text-on-surface-variant hover:text-primary rounded cursor-pointer transition-colors border border-outline-variant/50">Replace</button>
+                    <button onClick={() => setDeleteConfirm(c.id)} className="px-2 py-1 text-[9px] font-bold bg-surface-container-high hover:bg-error/20 text-on-surface-variant hover:text-error rounded cursor-pointer transition-colors border border-outline-variant/50">Delete</button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -211,6 +226,65 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ config, cameras, onS
             <div className="text-2xl font-bold text-on-surface-variant font-mono">— <span className="text-sm font-normal text-on-surface-variant">No data</span></div>
           </div>
         </div>
+      )}
+
+      {/* ═══ REPLACE CAMERA MODAL ═══ */}
+      {replaceModal && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-on-surface/50 backdrop-blur-sm" onClick={() => setReplaceModal(null)}>
+          <div className="bg-surface border border-outline-variant rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-outline-variant bg-surface-container-low">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[18px]">swap_horiz</span>
+                <h3 className="text-[13px] font-bold text-on-surface">Replace Camera Source</h3>
+              </div>
+              <p className="text-[11px] text-on-surface-variant mt-1 font-mono">{replaceModal.cameraId}</p>
+            </div>
+            <div className="px-5 py-4 space-y-3 text-[11px]">
+              <div>
+                <label className="block text-on-surface-variant font-medium mb-1">SOURCE TYPE</label>
+                <select value={replaceSourceType} onChange={(e) => setReplaceSourceType(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-on-surface outline-none">
+                  <option value="video">LOCAL VIDEO (MP4)</option>
+                  <option value="rtsp">RTSP STREAM</option>
+                  <option value="webcam">WEBCAM</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-on-surface-variant font-medium mb-1">{replaceSourceType === 'rtsp' ? 'RTSP URL' : replaceSourceType === 'webcam' ? 'WEBCAM INDEX' : 'VIDEO FILE PATH'}</label>
+                <input type="text" value={replaceSource} onChange={(e) => setReplaceSource(e.target.value)} placeholder={replaceSourceType === 'video' ? './data/cameras/cam-01.mp4' : replaceSourceType === 'rtsp' ? 'rtsp://192.168.1.101:554/live' : '0'} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 font-mono text-primary outline-none" />
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-outline-variant flex items-center justify-end gap-2">
+              <button onClick={() => setReplaceModal(null)} className="px-4 py-2 text-[11px] font-semibold text-on-surface-variant hover:text-on-surface rounded-lg cursor-pointer transition-colors">Cancel</button>
+              <button onClick={() => { if (replaceModal && replaceSource.trim()) { onReplaceCamera?.(replaceModal.cameraId, replaceSource.trim(), replaceSourceType); setReplaceModal(null); } }} disabled={!replaceSource.trim()} className="px-4 py-2 bg-primary hover:bg-primary/90 text-on-primary rounded-lg text-[11px] font-bold cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Replace Source</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ═══ DELETE CONFIRMATION MODAL ═══ */}
+      {deleteConfirm && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-on-surface/50 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)}>
+          <div className="bg-surface border border-outline-variant rounded-xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-outline-variant bg-error-container/20">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-error text-[18px]">delete</span>
+                <h3 className="text-[13px] font-bold text-on-surface">Delete Camera</h3>
+              </div>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-[12px] text-on-surface">
+                Delete <span className="font-mono font-bold text-error">{deleteConfirm}</span>?
+              </p>
+              <p className="text-[11px] text-on-surface-variant mt-1">This will remove the camera from monitoring.</p>
+            </div>
+            <div className="px-5 py-3 border-t border-outline-variant flex items-center justify-end gap-2">
+              <button onClick={() => setDeleteConfirm(null)} className="px-4 py-2 text-[11px] font-semibold text-on-surface-variant hover:text-on-surface rounded-lg cursor-pointer transition-colors">Cancel</button>
+              <button onClick={() => { if (deleteConfirm) { onDeleteCamera?.(deleteConfirm); setDeleteConfirm(null); } }} className="px-4 py-2 bg-error hover:bg-error/90 text-on-error rounded-lg text-[11px] font-bold cursor-pointer transition-colors">Delete Camera</button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
