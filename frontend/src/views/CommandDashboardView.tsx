@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { CameraFeed, BorderAlert, DashboardKpiStats } from '../types';
 import { NavPath } from '../components/Sidebar';
+import { useAuth } from '../contexts/AuthContext';
 
 interface CommandDashboardViewProps {
   stats: DashboardKpiStats;
@@ -24,6 +25,10 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
   onReplaceCamera,
   onDeleteCamera,
 }) => {
+  const { getAuthHeaders } = useAuth();
+  const AI_BASE = (import.meta.env.VITE_AI_SERVICE_URL || 'http://localhost:8000');
+  const authToken = getAuthHeaders()['Authorization']?.replace('Bearer ', '') || '';
+
   const [acknowledgedAlerts, setAcknowledgedAlerts] = useState<Record<string, boolean>>({});
 
   // Context menu state
@@ -233,11 +238,11 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Video Preview */}
+                  {/* Video Preview — uses the same MJPEG stream as the individual camera view */}
                   <div className="relative w-full aspect-video bg-surface-container-low overflow-hidden">
-                    {camera.videoPosterUrl ? (
+                    {camera.id && authToken ? (
                       <img
-                        src={camera.videoPosterUrl}
+                        src={AI_BASE + '/video/stream/' + camera.id + '?token=' + authToken}
                         alt={camera.name}
                         className="w-full h-full object-cover opacity-90 group-hover:scale-[1.02] transition-transform duration-500"
                       />

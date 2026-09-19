@@ -18,12 +18,13 @@ export function useAiAnpr() {
       const next = { ...prev };
 
       for (const aiRec of incoming) {
-        // Only surface meaningful records: a real plate reading exists and
-        // the plate is not a low-quality/uncertain detection.
-        if (!aiRec.plateText) continue;
+        // Surface all vehicle detections — show "PLATE NOT DETECTED" when no plate text
+        const hasPlate = !!aiRec.plateText;
 
-        // Dedup by trackId + plateText
-        const dedupKey = `${aiRec.trackId}:${aiRec.plateText}`;
+        // Dedup by trackId (with plate text if available)
+        const dedupKey = hasPlate
+          ? `${aiRec.trackId}:${aiRec.plateText}`
+          : `vehicle:${aiRec.trackId}`;
         if (seenRef.current.has(dedupKey)) {
           // Update existing record
           if (next[aiRec.id]) {
@@ -66,15 +67,17 @@ export function useAiAnpr() {
         const rec: AnprRecord = {
           id: aiRec.id,
           timestamp,
-          plateNumber: aiRec.plateText,
+          plateNumber: hasPlate ? aiRec.plateText : "PLATE NOT DETECTED",
           vehicleType: vehicleTypeMap[aiRec.vehicleClass] || "Sedan",
-          confidence: Math.round(aiRec.ocrConfidence || aiRec.plateConfidence),
+          confidence: hasPlate
+            ? Math.round(aiRec.ocrConfidence || aiRec.plateConfidence)
+            : Math.round(aiRec.plateConfidence),
           cameraId: aiRec.cameraId,
           cameraName: camNames[aiRec.cameraId] || aiRec.cameraId,
-          status: statusMap[aiRec.status] || "UNREGISTERED",
+          status: hasPlate
+            ? (statusMap[aiRec.status] || "UNREGISTERED")
+            : "UNREGISTERED",
           direction: "Restricted Zone",
-          // AI markers: an inferred/corrected plate is never presented as
-          // raw OCR - AnprView renders a distinct "AI.CORR" chip.
           ai: true,
           corrected: aiRec.corrected === true,
           rawPlateText: aiRec.rawOcrText || undefined,

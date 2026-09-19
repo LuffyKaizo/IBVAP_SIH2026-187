@@ -279,6 +279,9 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
   const [showTechDetails, setShowTechDetails] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [ptzCollapsed, setPtzCollapsed] = useState(true);
+  const [ptzFocused, setPtzFocused] = useState(false);
+  const ptzPanelRef = useRef<HTMLDivElement>(null);
 
   const isRealAi = stream.metadata?.ai_enabled !== undefined
     ? stream.metadata.ai_enabled && stream.isConnected
@@ -308,6 +311,25 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
     else { document.body.style.overflow = ''; }
     return () => { document.body.style.overflow = ''; };
   }, [isFullscreen]);
+
+  // Keyboard PTZ control
+  useEffect(() => {
+    if (!ptzFocused) return;
+    const handler = (e: KeyboardEvent) => {
+      const step = e.shiftKey ? 4 : 8;
+      switch (e.key) {
+        case 'ArrowUp': e.preventDefault(); setPtzPan((p) => ({ ...p, tilt: Math.min(25, p.tilt + step) })); break;
+        case 'ArrowDown': e.preventDefault(); setPtzPan((p) => ({ ...p, tilt: Math.max(-25, p.tilt - step) })); break;
+        case 'ArrowLeft': e.preventDefault(); setPtzPan((p) => ({ ...p, pan: Math.max(-40, p.pan - step) })); break;
+        case 'ArrowRight': e.preventDefault(); setPtzPan((p) => ({ ...p, pan: Math.min(40, p.pan + step) })); break;
+        case '+': case '=': e.preventDefault(); setPtzPan((p) => ({ ...p, zoom: Math.min(3, +(p.zoom + 0.2).toFixed(1)) })); break;
+        case '-': e.preventDefault(); setPtzPan((p) => ({ ...p, zoom: Math.max(1, +(p.zoom - 0.2).toFixed(1)) })); break;
+        case '0': e.preventDefault(); setPtzPan({ pan: 0, tilt: 0, zoom: 1 }); break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [ptzFocused]);
 
   const handleTakeSnapshot = () => {
     setSnapshotMessage(`Snapshot saved from ${camera.id} at ${new Date().toISOString().substring(11, 19)} UTC`);
@@ -410,6 +432,81 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
                   </div>
                 </div>
               )}
+
+              {/* Floating PTZ Overlay */}
+              <div
+                ref={ptzPanelRef}
+                tabIndex={0}
+                onFocus={() => setPtzFocused(true)}
+                onBlur={() => setPtzFocused(false)}
+                className={`absolute bottom-3 right-3 z-20 transition-all duration-200 ${ptzCollapsed ? 'w-auto' : 'w-56'}`}
+              >
+                {ptzCollapsed ? (
+                  <button
+                    onClick={() => setPtzCollapsed(false)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-on-surface/70 text-surface text-[11px] font-semibold backdrop-blur-sm hover:bg-on-surface/85 transition-colors cursor-pointer border border-white/10"
+                    title="PTZ Controls (click to expand)"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">gamepad</span>
+                    PTZ
+                  </button>
+                ) : (
+                  <div className="bg-surface/95 backdrop-blur-md border border-outline-variant rounded-xl shadow-2xl overflow-hidden">
+                    <div className="px-3 py-1.5 bg-surface-container-low border-b border-outline-variant flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[13px] text-primary">gamepad</span>
+                        <span className="text-[10px] font-bold text-on-surface tracking-wide uppercase">PTZ</span>
+                        {ptzFocused && <span className="px-1.5 py-0.5 bg-primary-container text-primary text-[8px] font-bold rounded">KEYS</span>}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[9px] text-success font-semibold">Ready</span>
+                        <button onClick={() => setPtzCollapsed(true)} className="p-0.5 rounded hover:bg-surface-container-high text-on-surface-variant cursor-pointer" title="Minimize">
+                          <span className="material-symbols-outlined text-[13px]">minimize</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="p-3 flex flex-col items-center gap-2">
+                      <div className="grid grid-cols-3 gap-1 w-28">
+                        <div />
+                        <button onClick={() => setPtzPan((p) => ({ ...p, tilt: Math.min(25, p.tilt + 8) }))} className="bg-surface-container-low hover:bg-surface-container-high border border-outline-variant rounded-md flex items-center justify-center text-primary cursor-pointer h-7" title="Tilt Up">
+                          <span className="material-symbols-outlined text-[15px]">expand_less</span>
+                        </button>
+                        <div />
+                        <button onClick={() => setPtzPan((p) => ({ ...p, pan: Math.max(-40, p.pan - 8) }))} className="bg-surface-container-low hover:bg-surface-container-high border border-outline-variant rounded-md flex items-center justify-center text-primary cursor-pointer h-7" title="Pan Left">
+                          <span className="material-symbols-outlined text-[15px]">chevron_left</span>
+                        </button>
+                        <button onClick={() => setPtzPan({ pan: 0, tilt: 0, zoom: 1 })} className="bg-surface-container-high border border-outline-variant rounded-md flex items-center justify-center text-[8px] text-on-surface-variant font-bold cursor-pointer h-7" title="Center">
+                          CTR
+                        </button>
+                        <button onClick={() => setPtzPan((p) => ({ ...p, pan: Math.min(40, p.pan + 8) }))} className="bg-surface-container-low hover:bg-surface-container-high border border-outline-variant rounded-md flex items-center justify-center text-primary cursor-pointer h-7" title="Pan Right">
+                          <span className="material-symbols-outlined text-[15px]">chevron_right</span>
+                        </button>
+                        <div />
+                        <button onClick={() => setPtzPan((p) => ({ ...p, tilt: Math.max(-25, p.tilt - 8) }))} className="bg-surface-container-low hover:bg-surface-container-high border border-outline-variant rounded-md flex items-center justify-center text-primary cursor-pointer h-7" title="Tilt Down">
+                          <span className="material-symbols-outlined text-[15px]">expand_more</span>
+                        </button>
+                        <div />
+                      </div>
+                      <div className="w-full flex items-center justify-between pt-1.5 border-t border-outline-variant text-[10px]">
+                        <span className="text-on-surface-variant">Zoom</span>
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => setPtzPan((p) => ({ ...p, zoom: Math.max(1, +(p.zoom - 0.2).toFixed(1)) }))} className="w-5 h-5 bg-surface-container-low border border-outline-variant rounded text-on-surface flex items-center justify-center cursor-pointer text-[11px]">-</button>
+                          <span className="font-mono text-primary font-bold min-w-[28px] text-center">{ptzPan.zoom.toFixed(1)}x</span>
+                          <button onClick={() => setPtzPan((p) => ({ ...p, zoom: Math.min(3, +(p.zoom + 0.2).toFixed(1)) }))} className="w-5 h-5 bg-surface-container-low border border-outline-variant rounded text-on-surface flex items-center justify-center cursor-pointer text-[11px]">+</button>
+                        </div>
+                      </div>
+                      <div className="text-[8px] text-on-surface-variant/50 text-center">Arrow keys · +/- zoom · 0 reset</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* PTZ Position Indicator */}
+              {(ptzPan.pan !== 0 || ptzPan.tilt !== 0 || ptzPan.zoom !== 1) && (
+                <div className="absolute top-3 left-3 px-2 py-1 bg-on-surface/70 text-surface text-[9px] rounded font-mono backdrop-blur-sm border border-white/10">
+                  P:{ptzPan.pan} T:{ptzPan.tilt} Z:{ptzPan.zoom.toFixed(1)}x
+                </div>
+              )}
             </div>
 
             {/* Actions Toolbar */}
@@ -466,34 +563,6 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
             </div>
           </div>
 
-          {/* PTZ Controls */}
-          <div className="bg-surface border border-outline-variant rounded-xl p-4">
-            <div className="flex items-center justify-between mb-3 border-b border-outline-variant pb-2">
-              <span className="text-[11px] font-bold text-on-surface tracking-wide uppercase">PTZ Controls</span>
-              <span className="text-[10px] text-success font-semibold">Motor Ready</span>
-            </div>
-            <div className="flex flex-col items-center gap-3">
-              <div className="grid grid-cols-3 gap-1.5 w-32 h-32">
-                <div />
-                <button onClick={() => setPtzPan((p) => ({ ...p, tilt: Math.min(25, p.tilt + 8) }))} className="bg-surface-container-low hover:bg-surface-container-high border border-outline-variant rounded-lg flex items-center justify-center text-primary cursor-pointer"><span className="material-symbols-outlined text-[18px]">expand_less</span></button>
-                <div />
-                <button onClick={() => setPtzPan((p) => ({ ...p, pan: Math.max(-40, p.pan - 8) }))} className="bg-surface-container-low hover:bg-surface-container-high border border-outline-variant rounded-lg flex items-center justify-center text-primary cursor-pointer"><span className="material-symbols-outlined text-[18px]">chevron_left</span></button>
-                <button onClick={() => setPtzPan({ pan: 0, tilt: 0, zoom: 1 })} className="bg-surface-container-high border border-outline-variant rounded-lg flex items-center justify-center text-[9px] text-on-surface-variant font-bold cursor-pointer">CENTER</button>
-                <button onClick={() => setPtzPan((p) => ({ ...p, pan: Math.min(40, p.pan + 8) }))} className="bg-surface-container-low hover:bg-surface-container-high border border-outline-variant rounded-lg flex items-center justify-center text-primary cursor-pointer"><span className="material-symbols-outlined text-[18px]">chevron_right</span></button>
-                <div />
-                <button onClick={() => setPtzPan((p) => ({ ...p, tilt: Math.max(-25, p.tilt - 8) }))} className="bg-surface-container-low hover:bg-surface-container-high border border-outline-variant rounded-lg flex items-center justify-center text-primary cursor-pointer"><span className="material-symbols-outlined text-[18px]">expand_more</span></button>
-                <div />
-              </div>
-              <div className="w-full flex items-center justify-between pt-2 border-t border-outline-variant text-[11px]">
-                <span className="text-on-surface-variant">Zoom</span>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setPtzPan((p) => ({ ...p, zoom: Math.max(1, p.zoom - 0.2) }))} className="px-2 py-0.5 bg-surface-container-low border border-outline-variant rounded text-on-surface cursor-pointer">-</button>
-                  <span className="font-mono text-primary font-bold">{ptzPan.zoom.toFixed(1)}x</span>
-                  <button onClick={() => setPtzPan((p) => ({ ...p, zoom: Math.min(3, p.zoom + 0.2) }))} className="px-2 py-0.5 bg-surface-container-low border border-outline-variant rounded text-on-surface cursor-pointer">+</button>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Analysis Panel */}
@@ -628,6 +697,65 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
             {isNightFilter && <div style={{ position: 'absolute', inset: 0, background: 'rgba(2,44,30,0.3)', mixBlendMode: 'color', pointerEvents: 'none' }} />}
             {isRealAi && <AIBoundingBoxOverlay detections={detections} trackContext={trackContext} />}
             {isRealAi && <AIFaceOverlay faces={faces} />}
+
+            {/* Fullscreen PTZ Overlay - bottom right */}
+            <div style={{ position: 'absolute', bottom: '80px', right: '20px', zIndex: 20 }} tabIndex={0}
+              onFocus={() => setPtzFocused(true)} onBlur={() => setPtzFocused(false)}>
+              {ptzCollapsed ? (
+                <button onClick={() => setPtzCollapsed(false)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(8px)', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>gamepad</span> PTZ
+                </button>
+              ) : (
+                <div style={{ backgroundColor: 'rgba(20,20,30,0.9)', backdropFilter: 'blur(12px)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden', width: '220px' }}>
+                  <div style={{ padding: '6px 12px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: '14px', color: '#7C8CF8' }}>gamepad</span>
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#fff', letterSpacing: '0.05em' }}>PTZ</span>
+                    </div>
+                    <button onClick={() => setPtzCollapsed(true)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', padding: '2px' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>minimize</span>
+                    </button>
+                  </div>
+                  <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px', width: '112px' }}>
+                      <div />
+                      <button onClick={() => setPtzPan((p) => ({ ...p, tilt: Math.min(25, p.tilt + 8) }))} style={{ height: '28px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.1)', color: '#7C8CF8', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>expand_less</span>
+                      </button>
+                      <div />
+                      <button onClick={() => setPtzPan((p) => ({ ...p, pan: Math.max(-40, p.pan - 8) }))} style={{ height: '28px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.1)', color: '#7C8CF8', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>chevron_left</span>
+                      </button>
+                      <button onClick={() => setPtzPan({ pan: 0, tilt: 0, zoom: 1 })} style={{ height: '28px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', fontWeight: 700 }}>CTR</button>
+                      <button onClick={() => setPtzPan((p) => ({ ...p, pan: Math.min(40, p.pan + 8) }))} style={{ height: '28px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.1)', color: '#7C8CF8', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>chevron_right</span>
+                      </button>
+                      <div />
+                      <button onClick={() => setPtzPan((p) => ({ ...p, tilt: Math.max(-25, p.tilt - 8) }))} style={{ height: '28px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.1)', color: '#7C8CF8', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>expand_more</span>
+                      </button>
+                      <div />
+                    </div>
+                    <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.1)', fontSize: '10px' }}>
+                      <span style={{ color: 'rgba(255,255,255,0.5)' }}>Zoom</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <button onClick={() => setPtzPan((p) => ({ ...p, zoom: Math.max(1, +(p.zoom - 0.2).toFixed(1)) }))} style={{ width: '20px', height: '20px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px' }}>-</button>
+                        <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#7C8CF8', fontWeight: 700, minWidth: '28px', textAlign: 'center' }}>{ptzPan.zoom.toFixed(1)}x</span>
+                        <button onClick={() => setPtzPan((p) => ({ ...p, zoom: Math.min(3, +(p.zoom + 0.2).toFixed(1)) }))} style={{ width: '20px', height: '20px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px' }}>+</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Fullscreen PTZ Position Indicator */}
+            {(ptzPan.pan !== 0 || ptzPan.tilt !== 0 || ptzPan.zoom !== 1) && (
+              <div style={{ position: 'absolute', top: '80px', left: '20px', padding: '4px 8px', backgroundColor: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: '10px', borderRadius: '4px', fontFamily: 'JetBrains Mono, monospace', backdropFilter: 'blur(4px)', zIndex: 20 }}>
+                P:{ptzPan.pan} T:{ptzPan.tilt} Z:{ptzPan.zoom.toFixed(1)}x
+              </div>
+            )}
           </div>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'linear-gradient(to bottom, rgba(0,0,0,0.75), transparent)', zIndex: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -719,6 +847,30 @@ export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
     setContextMenu({ cameraId, x, y });
   }, []);
 
+  const [aiToggleError, setAiToggleError] = useState<string | null>(null);
+
+  const handleToggleAi = useCallback(async (cameraId: string, enabled: boolean) => {
+    setAiToggleError(null);
+    try {
+      const resp = await fetch(`/api/cameras/${cameraId}/ai-toggle`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ ai_enabled: enabled }),
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        setAiToggleError(body.detail || `Failed (${resp.status})`);
+        setTimeout(() => setAiToggleError(null), 4000);
+      }
+    } catch {
+      setAiToggleError('Network error - AI backend unreachable');
+      setTimeout(() => setAiToggleError(null), 4000);
+    }
+  }, [token]);
+
   const handleContextAction = useCallback((action: ContextMenuAction) => {
     if (!contextMenu) return;
     const cid = contextMenu.cameraId;
@@ -729,18 +881,14 @@ export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
         break;
       case 'fullscreen':
         handleOpenCamera(cid);
-        // Fullscreen will be triggered after view switch
         break;
       case 'analysis':
         setAnalysisCameraId(cid);
         handleOpenCamera(cid);
-        // Analysis panel opens in single view
         break;
       case 'alerts':
-        // Navigate handled by parent
         break;
       case 'anpr':
-        // Navigate handled by parent
         break;
       case 'ai-toggle': {
         const currentAi = cameraAiStatesRef.current[cid] !== false;
@@ -748,20 +896,7 @@ export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
         break;
       }
     }
-  }, [contextMenu, handleOpenCamera]);
-
-  const handleToggleAi = useCallback(async (cameraId: string, enabled: boolean) => {
-    try {
-      await fetch(`/api/cameras/${cameraId}/ai-toggle`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ ai_enabled: enabled }),
-      });
-    } catch { /* ignore */ }
-  }, [token]);
+  }, [contextMenu, handleOpenCamera, handleToggleAi]);
 
   // Close context menu on click outside
   useEffect(() => {
@@ -811,6 +946,13 @@ export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
   // Grid view (All Cameras)
   return (
     <div className="flex flex-col w-full p-4 md:p-6 gap-5 select-none max-w-7xl mx-auto">
+      {/* AI Toggle Error Toast */}
+      {aiToggleError && (
+        <div className="px-4 py-2.5 bg-error-container border border-error/20 text-error text-[12px] font-semibold rounded-lg flex items-center gap-2">
+          <span className="material-symbols-outlined text-[16px]">error</span> {aiToggleError}
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-surface border border-outline-variant p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>

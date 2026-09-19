@@ -650,15 +650,10 @@ async def video_stream(
 
 @app.websocket("/ws/cameras/{camera_id}")
 async def websocket_tracking(websocket: WebSocket, camera_id: str):
-    # Verify token before accepting
-    token = websocket.query_params.get("token")
-    if not token:
-        await websocket.close(code=4001, reason="Not authenticated")
-        return
-    from ai.auth.jwt import decode_access_token
-    payload = decode_access_token(token, settings.SECRET_KEY)
-    if payload is None:
-        await websocket.close(code=4001, reason="Invalid token")
+    from ai.auth.deps import verify_ws_token
+    try:
+        await verify_ws_token(websocket)
+    except HTTPException:
         return
 
     await websocket.accept()
