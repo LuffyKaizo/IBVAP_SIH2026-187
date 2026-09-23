@@ -6,7 +6,7 @@ import type { AiTrackingMetadata, AiAnprRecord, AnprRecord } from "../types";
  * into the existing AnprRecord format used by AnprView.
  * Handles deduplication by trackId + plateText.
  */
-export function useAiAnpr() {
+export function useAiAnpr(cameras?: { id: string; name: string }[]) {
   const [aiAnprRecords, setAiAnprRecords] = useState<Record<string, AnprRecord>>({});
   const seenRef = useRef<Set<string>>(new Set());
 
@@ -18,12 +18,13 @@ export function useAiAnpr() {
       const next = { ...prev };
 
       for (const aiRec of incoming) {
-        // Only surface meaningful records: a real plate reading exists and
-        // the plate is not a low-quality/uncertain detection.
-        if (!aiRec.plateText) continue;
+        // Surface all vehicle detections — show "PLATE NOT DETECTED" when no plate text
+        const hasPlate = !!aiRec.plateText;
 
-        // Dedup by trackId + plateText
-        const dedupKey = `${aiRec.trackId}:${aiRec.plateText}`;
+        // Dedup by trackId (with plate text if available)
+        const dedupKey = hasPlate
+          ? `${aiRec.trackId}:${aiRec.plateText}`
+          : `vehicle:${aiRec.trackId}`;
         if (seenRef.current.has(dedupKey)) {
           // Update existing record
           if (next[aiRec.id]) {
@@ -57,24 +58,25 @@ export function useAiAnpr() {
           ? new Date(aiRec.timestamp).toISOString().substring(11, 19) + " UTC"
           : new Date().toISOString().substring(11, 19) + " UTC";
 
-        const camNames: Record<string, string> = {
-          "CAM-01": "BOP NORTH MAIN GATE",
-          "CAM-02": "BORDER ROAD SECTOR 3",
-          "CAM-03": "CHECK POST VEHICLE LANE",
-        };
+        const camNames: Record<string, string> = (cameras || []).reduce<Record<string, string>>((acc, c) => {
+          acc[c.id] = c.name;
+          return acc;
+        }, {});
 
         const rec: AnprRecord = {
           id: aiRec.id,
           timestamp,
-          plateNumber: aiRec.plateText,
+          plateNumber: hasPlate ? aiRec.plateText : "PLATE NOT DETECTED",
           vehicleType: vehicleTypeMap[aiRec.vehicleClass] || "Sedan",
-          confidence: Math.round(aiRec.ocrConfidence || aiRec.plateConfidence),
+          confidence: hasPlate
+            ? Math.round(aiRec.ocrConfidence || aiRec.plateConfidence)
+            : Math.round(aiRec.plateConfidence),
           cameraId: aiRec.cameraId,
           cameraName: camNames[aiRec.cameraId] || aiRec.cameraId,
-          status: statusMap[aiRec.status] || "UNREGISTERED",
+          status: hasPlate
+            ? (statusMap[aiRec.status] || "UNREGISTERED")
+            : "UNREGISTERED",
           direction: "Restricted Zone",
-          // AI markers: an inferred/corrected plate is never presented as
-          // raw OCR - AnprView renders a distinct "AI.CORR" chip.
           ai: true,
           corrected: aiRec.corrected === true,
           rawPlateText: aiRec.rawOcrText || undefined,
@@ -85,7 +87,7 @@ export function useAiAnpr() {
 
       return next;
     });
-  }, []);
+  }, [cameras]);
 
   const aiAnprArray: AnprRecord[] = Object.values(aiAnprRecords);
 

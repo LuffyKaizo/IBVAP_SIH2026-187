@@ -596,6 +596,63 @@ async def get_camera_footage(
     }
 
 
+_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".m4v", ".flv"}
+
+
+@app.get("/videos")
+async def list_video_files(
+    folder: Optional[str] = Query(None),
+    _user: UserContext = Depends(require_permission(Permission.CAMERA_READ)),
+):
+    """Discover video files on disk for camera source registration.
+
+    If `folder` is given (relative to the project root or absolute), scan only that
+    folder recursively. Otherwise scan the default media folders (data/cameras, data).
+    Returns entries with the project-root-relative path usable as a camera source.
+    """
+    default_folders = ["data/cameras", "data"]
+    if folder and folder.strip():
+        folders = [p.strip() for p in folder.split(";") if p.strip()]
+    else:
+        folders = list(default_folders)
+
+    # main.py is at backend/ai/main.py → 3 levels up = project root
+    # (backend CWD is `backend/`, but video files live at project root `data/`)
+    project_root = Path(__file__).resolve().parent.parent.parent
+    found = []
+    seen = set()
+    for raw in folders:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = project_root / p
+        if not p.exists() or not p.is_dir():
+            continue
+        for f in sorted(p.rglob("*")):
+            if not f.is_file():
+                continue
+            if f.suffix.lower() not in _VIDEO_EXTENSIONS:
+                continue
+            try:
+                rel = f.resolve().relative_to(project_root).as_posix()
+                if not rel.startswith("./"):
+                    rel = "./" + rel
+            except ValueError:
+                rel = str(f)
+            if rel in seen:
+                continue
+            seen.add(rel)
+            found.append({
+                "path": rel,
+                "name": f.name,
+                "folder": str(f.parent).replace(str(project_root), ".").replace("\\", "/"),
+                "size_bytes": f.stat().st_size,
+                "extension": f.suffix.lower(),
+            })
+    if not found:
+        return {"videos": [], "folders": folders, "message": "No video files found in: " + ", ".join(folders)}
+    return {"videos": found, "folders": folders}
+
+
 # ──────────────────────────────────────────────────────────────────
 # MJPEG Video Stream (token via query param)
 # ──────────────────────────────────────────────────────────────────
@@ -650,15 +707,10 @@ async def video_stream(
 
 @app.websocket("/ws/cameras/{camera_id}")
 async def websocket_tracking(websocket: WebSocket, camera_id: str):
-    # Verify token before accepting
-    token = websocket.query_params.get("token")
-    if not token:
-        await websocket.close(code=4001, reason="Not authenticated")
-        return
-    from ai.auth.jwt import decode_access_token
-    payload = decode_access_token(token, settings.SECRET_KEY)
-    if payload is None:
-        await websocket.close(code=4001, reason="Invalid token")
+    from ai.auth.deps import verify_ws_token
+    try:
+        await verify_ws_token(websocket)
+    except HTTPException:
         return
 
     await websocket.accept()

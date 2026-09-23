@@ -1,16 +1,13 @@
-"""License plate region detection using OpenCV contour analysis.
+"""License plate region detection — YOLO primary, OpenCV fallback.
 
-This module detects candidate license plate regions within vehicle ROIs
-using edge detection, morphological operations, and contour filtering.
-
-The detector does NOT require a separate ML model — it uses classical
-computer vision techniques that work well for standard license plates
-in reasonable visibility conditions.
+Primary: YOLOv8 model (license_plate_detector.pt) for high-accuracy detection.
+Fallback: Classical OpenCV contour analysis when YOLO is unavailable or fails.
 """
 
 import cv2
 import numpy as np
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional
 
 from ai.config import settings
@@ -24,29 +21,52 @@ class PlateCandidate:
     area: float
 
 
+def _find_model() -> Optional[Path]:
+    """Search for license_plate_detector.pt in known locations."""
+    candidates = [
+        Path(settings.BASE_DIR) / "license_plate_detector.pt",
+        Path(settings.BASE_DIR).parent / "license_plate_detector.pt",
+        Path(__file__).resolve().parent.parent.parent.parent / "license_plate_detector.pt",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
 class PlateDetector:
     """Detects license plate regions within vehicle bounding boxes.
-    
-    Uses a multi-stage approach:
-    1. Convert to grayscale
-    2. Edge detection (Canny)
-    3. Morphological closing to connect plate edges
-    4. Contour detection
-    5. Rectangular contour filtering by aspect ratio and area
+
+    Uses YOLO (primary) + OpenCV contour analysis (fallback).
     """
 
     def __init__(self):
         self._min_aspect = settings.ANPR_PLATE_ASPECT_MIN
         self._max_aspect = settings.ANPR_PLATE_ASPECT_MAX
+        self._yolo_model = None
+        self._yolo_available = False
+        self._init_yolo()
+
+    def _init_yolo(self):
+        """Try to load the YOLO plate detection model."""
+        try:
+            from ultralytics import YOLO
+            model_path = _find_model()
+            if model_path is None:
+                print("[PLATE-DETECTOR] license_plate_detector.pt not found, using OpenCV fallback")
+                return
+            self._yolo_model = YOLO(str(model_path))
+            self._yolo_available = True
+            print(f"[PLATE-DETECTOR] YOLO model loaded: {model_path.name}")
+        except ImportError:
+            print("[PLATE-DETECTOR] ultralytics not installed, using OpenCV fallback")
+        except Exception as e:
+            print(f"[PLATE-DETECTOR] YOLO init failed: {e}, using OpenCV fallback")
 
     def detect_plates(self, vehicle_roi: np.ndarray) -> List[PlateCandidate]:
         """Detect license plate candidates within a vehicle ROI.
-        
-        Args:
-            vehicle_roi: Cropped image of the vehicle (BGR)
-            
-        Returns:
-            List of PlateCandidate objects, sorted by confidence (best first)
+
+        Tries YOLO first, falls back to OpenCV contour analysis.
         """
         if vehicle_roi is None or vehicle_roi.size == 0:
             return []
@@ -55,155 +75,152 @@ class PlateDetector:
         if h < 10 or w < 10:
             return []
 
-        # Stage 1: Preprocessing
+        # Primary: YOLO detection
+        if self._yolo_available and self._yolo_model is not None:
+            candidates = self._detect_yolo(vehicle_roi, w, h)
+            if candidates:
+                return candidates
+
+        # Fallback: OpenCV contour analysis
+        return self._detect_opencv(vehicle_roi, w, h)
+
+    def _detect_yolo(self, vehicle_roi: np.ndarray, w: int, h: int) -> List[PlateCandidate]:
+        """YOLO-based plate detection."""
+        try:
+            results = self._yolo_model(vehicle_roi, verbose=False, conf=0.25)
+            candidates = []
+            for r in results:
+                if r.boxes is None:
+                    continue
+                for box in r.boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    conf = float(box.conf[0])
+                    bw = x2 - x1
+                    bh = y2 - y1
+                    if bw < 5 or bh < 5:
+                        continue
+                    candidates.append(PlateCandidate(
+                        bbox=(int(x1), int(y1), int(x2), int(y2)),
+                        confidence=conf,
+                        area=bw * bh,
+                    ))
+            candidates.sort(key=lambda c: c.confidence, reverse=True)
+            return candidates[:3]
+        except Exception:
+            return []
+
+    def _detect_opencv(self, vehicle_roi: np.ndarray, w: int, h: int) -> List[PlateCandidate]:
+        """OpenCV contour-based plate detection (fallback)."""
         gray = cv2.cvtColor(vehicle_roi, cv2.COLOR_BGR2GRAY)
-        
-        # Apply bilateral filter to reduce noise while keeping edges
         blurred = cv2.bilateralFilter(gray, 11, 17, 17)
-        
-        # Stage 2: Edge detection
         edges = cv2.Canny(blurred, 30, 200)
-        
-        # Stage 3: Morphological closing to connect plate edges
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3))
         closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
-        
-        # Stage 4: Dilate to thicken edges
         dilated = cv2.dilate(closed, kernel, iterations=2)
-        
-        # Stage 5: Find contours
         contours, _ = cv2.findContours(dilated, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        
+
         candidates = []
-        
+        roi_area = h * w
+
         for contour in contours:
-            # Approximate contour to polygon
             peri = cv2.arcLength(contour, True)
             approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
-            
-            # License plates are typically quadrilaterals
             if len(approx) < 4 or len(approx) > 6:
                 continue
-            
-            # Get bounding rectangle
             x, y, cw, ch = cv2.boundingRect(approx)
-            
-            # Filter by aspect ratio (plates are wider than tall)
             if ch == 0:
                 continue
             aspect = cw / ch
-            
             if aspect < self._min_aspect or aspect > self._max_aspect:
                 continue
-            
-            # Filter by area (relative to ROI)
-            roi_area = h * w
             plate_area = cw * ch
-            
-            # Plate should be between 1% and 30% of vehicle area
             area_ratio = plate_area / roi_area
             if area_ratio < 0.01 or area_ratio > 0.30:
                 continue
-            
-            # Calculate confidence based on shape quality
-            # Better approximations (closer to 4 corners) and good aspect = higher confidence
             corner_score = 1.0 - abs(len(approx) - 4) * 0.1
-            aspect_score = 1.0 - min(abs(aspect - 3.0) / 3.0, 1.0)  # ideal ratio ~3:1
-            area_score = 1.0 - min(abs(area_ratio - 0.05) / 0.05, 1.0)  # ideal ~5%
-            
+            aspect_score = 1.0 - min(abs(aspect - 3.0) / 3.0, 1.0)
+            area_score = 1.0 - min(abs(area_ratio - 0.05) / 0.05, 1.0)
             confidence = (corner_score * 0.4 + aspect_score * 0.3 + area_score * 0.3)
             confidence = max(0.1, min(confidence, 0.95))
-            
             candidates.append(PlateCandidate(
                 bbox=(x, y, x + cw, y + ch),
                 confidence=confidence,
                 area=plate_area,
             ))
-        
-        # Sort by confidence (best first)
+
         candidates.sort(key=lambda c: c.confidence, reverse=True)
-        
-        # Return top candidates (usually just 1 plate per vehicle)
         return candidates[:3]
 
     def extract_plate_crop(self, vehicle_roi: np.ndarray, candidate: PlateCandidate,
                            padding: int = 5) -> Optional[np.ndarray]:
         """Extract a plate crop from the vehicle ROI.
-        
+
         Args:
             vehicle_roi: The full vehicle image
             candidate: A PlateCandidate with bbox coordinates
             padding: Extra pixels around the plate for context
-            
+
         Returns:
             Cropped plate image, or None if invalid
         """
         if vehicle_roi is None or candidate is None or vehicle_roi.ndim < 2:
             return None
-        
+
         h, w = vehicle_roi.shape[:2]
         x1, y1, x2, y2 = candidate.bbox
-        
+
         # Reject zero-area bbox BEFORE padding
         if x2 <= x1 or y2 <= y1:
             return None
-        
+
         # Add padding
         x1 = max(0, x1 - padding)
         y1 = max(0, y1 - padding)
         x2 = min(w, x2 + padding)
         y2 = min(h, y2 + padding)
-        
+
         if x2 <= x1 or y2 <= y1:
             return None
-        
+
         crop = vehicle_roi[y1:y2, x1:x2]
-        
+
         if crop.size == 0:
             return None
-        
+
         return crop
 
     def preprocess_for_ocr(self, plate_crop: np.ndarray) -> np.ndarray:
         """Preprocess a plate crop for OCR.
-        
-        Evidence-based (bench_preprocess.py, real EasyOCR inference):
-        - Binarization (adaptive/Otsu) does NOT improve recognition and can
-          destroy anti-aliased glyph shapes EasyOCR expects (adaptive
-          thresholding even injected a spurious character on one test image).
-        - Grayscale with upscaling matches color input accuracy at lower cost.
-        
+
         Operations:
         1. Convert to grayscale
         2. Upscale small crops so glyphs are readable (min height 80px)
         3. No thresholding / no denoising
-        
+
         Args:
             plate_crop: Cropped license plate image (BGR)
-            
+
         Returns:
             Preprocessed grayscale image suitable for OCR
         """
         if plate_crop is None or plate_crop.size == 0:
             return np.zeros((40, 120), dtype=np.uint8)
-        
+
         # Convert to grayscale
         if len(plate_crop.shape) == 3:
             gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
         else:
             gray = plate_crop.copy()
-        
+
         h, w = gray.shape[:2]
         if h > 0:
             if h < 80:
-                # Upscale small plate crops (only upscaling, never downscaling)
                 scale = 80.0 / h
                 target_w = max(int(w * scale), 40)
                 gray = cv2.resize(gray, (target_w, 80), interpolation=cv2.INTER_CUBIC)
             elif h > 200:
-                # Cap very large crops to bound OCR cost
                 scale = 200.0 / h
                 target_w = max(int(w * scale), 40)
                 gray = cv2.resize(gray, (target_w, 200), interpolation=cv2.INTER_CUBIC)
-        
+
         return gray

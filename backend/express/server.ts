@@ -172,6 +172,21 @@ async function startServer() {
     }
   });
 
+  // Discover video files on disk for camera source registration — proxy to FastAPI
+  app.get('/api/videos', verifyToken, async (req, res) => {
+    const folder = typeof req.query.folder === 'string' ? req.query.folder : undefined;
+    const qs = folder ? `?folder=${encodeURIComponent(folder)}` : '';
+    try {
+      const resp = await fetch(AI_URL + '/videos' + qs, {
+        headers: { Authorization: req.headers.authorization || '' },
+      });
+      const data = await resp.json();
+      res.status(resp.status).json(data);
+    } catch {
+      res.status(502).json({ detail: 'AI backend unavailable' });
+    }
+  });
+
   // Camera feeds list — proxy to FastAPI for real camera data
   app.get('/api/cameras', verifyToken, async (req, res) => {
     try {
@@ -207,71 +222,74 @@ async function startServer() {
     }
   });
 
-  // Single Camera feed
-  app.get('/api/cameras/:id', verifyToken, (req, res) => {
-    const { id } = req.params;
-    const camera = camerasStore.find(c => c.id.toLowerCase() === id.toLowerCase());
-    if (!camera) {
-      return res.json(camerasStore[0]);
+  // Single Camera feed — proxy to FastAPI
+  app.get('/api/cameras/:id', verifyToken, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const aiUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+      const resp = await fetch(`${aiUrl}/cameras/${id}`, {
+        headers: { Authorization: req.headers.authorization || '' },
+      });
+      const data = await resp.json();
+      res.status(resp.status).json(data);
+    } catch {
+      res.status(502).json({ detail: 'AI backend unavailable' });
     }
-    res.json(camera);
   });
 
-  // Register a new camera (ADMIN only)
-  app.post('/api/cameras', verifyToken, requireRole('ADMIN'), (req, res) => {
-    const { id, name, rtspUrl, location, sourceType, cameraType } = req.body;
-    if (!id || !name || !rtspUrl) {
-      return res.status(400).json({ error: 'id, name, and rtspUrl are required' });
+  // Register a new camera — proxy to FastAPI (ADMIN only)
+  app.post('/api/cameras', verifyToken, requireRole('ADMIN'), async (req, res) => {
+    try {
+      const aiUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+      const resp = await fetch(`${aiUrl}/cameras`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(req.headers.authorization ? { Authorization: req.headers.authorization } : {}),
+        },
+        body: JSON.stringify(req.body),
+      });
+      const data = await resp.json();
+      res.status(resp.status).json(data);
+    } catch {
+      res.status(502).json({ detail: 'AI backend unavailable' });
     }
-    const exists = camerasStore.find(c => c.id.toLowerCase() === id.toLowerCase());
-    if (exists) {
-      return res.status(409).json({ error: 'Camera already registered: ' + id });
-    }
-    const newCamera: CameraFeed = {
-      id: id.trim().toUpperCase(),
-      name: name.trim().toUpperCase(),
-      sector: 'Dynamic',
-      rtspUrl: rtspUrl.trim(),
-      location: (location || '').trim(),
-      coordinates: '0.0000° N, 0.0000° W',
-      fps: 30,
-      resolution: '1080p @ 30fps',
-      bitrate: '4.0 Mbps',
-      status: 'ONLINE',
-      isNightMode: false,
-      ptzSupport: cameraType === 'PTZ',
-      videoPosterUrl: '',
-      activeAlertCount: 0,
-      detections: [],
-    };
-    camerasStore.unshift(newCamera);
-    res.json({ success: true, camera: newCamera });
   });
 
-  // Update camera (ADMIN only)
-  app.patch('/api/cameras/:id', verifyToken, requireRole('ADMIN'), (req, res) => {
-    const { id } = req.params;
-    const idx = camerasStore.findIndex(c => c.id.toLowerCase() === id.toLowerCase());
-    if (idx === -1) {
-      return res.status(404).json({ error: 'Camera not found: ' + id });
+  // Update camera — proxy to FastAPI (ADMIN only)
+  app.patch('/api/cameras/:id', verifyToken, requireRole('ADMIN'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const aiUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+      const resp = await fetch(`${aiUrl}/cameras/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(req.headers.authorization ? { Authorization: req.headers.authorization } : {}),
+        },
+        body: JSON.stringify(req.body),
+      });
+      const data = await resp.json();
+      res.status(resp.status).json(data);
+    } catch {
+      res.status(502).json({ detail: 'AI backend unavailable' });
     }
-    const updates = req.body;
-    if (updates.name) camerasStore[idx].name = updates.name;
-    if (updates.rtspUrl) camerasStore[idx].rtspUrl = updates.rtspUrl;
-    if (updates.location) camerasStore[idx].location = updates.location;
-    if (updates.status) camerasStore[idx].status = updates.status;
-    res.json({ success: true, camera: camerasStore[idx] });
   });
 
-  // Delete camera (ADMIN only)
-  app.delete('/api/cameras/:id', verifyToken, requireRole('ADMIN'), (req, res) => {
-    const { id } = req.params;
-    const before = camerasStore.length;
-    camerasStore = camerasStore.filter(c => c.id.toLowerCase() !== id.toLowerCase());
-    if (camerasStore.length === before) {
-      return res.status(404).json({ error: 'Camera not found: ' + id });
+  // Delete camera — proxy to FastAPI (ADMIN only)
+  app.delete('/api/cameras/:id', verifyToken, requireRole('ADMIN'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const aiUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+      const resp = await fetch(`${aiUrl}/cameras/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: req.headers.authorization || '' },
+      });
+      const data = await resp.json();
+      res.status(resp.status).json(data);
+    } catch {
+      res.status(502).json({ detail: 'AI backend unavailable' });
     }
-    res.json({ success: true, camera_id: id });
   });
 
   // Toggle AI processing for a camera (ADMIN only — proxy to FastAPI)
