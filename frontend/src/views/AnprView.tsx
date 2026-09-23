@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { AnprRecord } from '../types';
+import { AnprRecord, CameraFeed } from '../types';
 
 interface AnprViewProps {
   records: AnprRecord[];
+  cameras?: CameraFeed[];
   onAddRecord?: (record: AnprRecord) => void;
 }
 
-export const AnprView: React.FC<AnprViewProps> = ({ records, onAddRecord }) => {
+export const AnprView: React.FC<AnprViewProps> = ({ records, cameras = [], onAddRecord }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'WHITELIST' | 'WATCHLIST' | 'UNREGISTERED'>('ALL');
   const [selectedRecord, setSelectedRecord] = useState<AnprRecord | null>(
@@ -14,7 +15,7 @@ export const AnprView: React.FC<AnprViewProps> = ({ records, onAddRecord }) => {
   );
   const [simPlate, setSimPlate] = useState('');
   const [simType, setSimType] = useState<'SUV' | 'Sedan' | 'Truck' | 'Motorcycle' | 'Pickup'>('SUV');
-  const [simCamera, setSimCamera] = useState('CAM-03');
+  const [simCamera, setSimCamera] = useState(cameras.length > 0 ? cameras[0].id : 'CAM-01');
   const [scanNotice, setScanNotice] = useState<string | null>(null);
 
   const filteredRecords = records.filter((rec) => {
@@ -164,7 +165,9 @@ export const AnprView: React.FC<AnprViewProps> = ({ records, onAddRecord }) => {
                 <div>
                   <label className="block text-on-surface-variant font-medium mb-1">CAMERA</label>
                   <select value={simCamera} onChange={(e) => setSimCamera(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-on-surface outline-none cursor-pointer">
-                    <option value="CAM-03">CAM-03</option><option value="CAM-01">CAM-01</option><option value="CAM-02">CAM-02</option>
+                    {(cameras.length > 0 ? cameras.map((c) => c.id) : ['CAM-01', 'CAM-02', 'CAM-03']).map((id) => (
+                      <option key={id} value={id}>{id}</option>
+                    ))}
                   </select>
                 </div>
               </div>

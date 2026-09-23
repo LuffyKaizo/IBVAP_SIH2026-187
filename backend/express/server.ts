@@ -172,6 +172,21 @@ async function startServer() {
     }
   });
 
+  // Discover video files on disk for camera source registration — proxy to FastAPI
+  app.get('/api/videos', verifyToken, async (req, res) => {
+    const folder = typeof req.query.folder === 'string' ? req.query.folder : undefined;
+    const qs = folder ? `?folder=${encodeURIComponent(folder)}` : '';
+    try {
+      const resp = await fetch(AI_URL + '/videos' + qs, {
+        headers: { Authorization: req.headers.authorization || '' },
+      });
+      const data = await resp.json();
+      res.status(resp.status).json(data);
+    } catch {
+      res.status(502).json({ detail: 'AI backend unavailable' });
+    }
+  });
+
   // Camera feeds list — proxy to FastAPI for real camera data
   app.get('/api/cameras', verifyToken, async (req, res) => {
     try {

@@ -6,7 +6,7 @@ import type { AiTrackingMetadata, AiAnprRecord, AnprRecord } from "../types";
  * into the existing AnprRecord format used by AnprView.
  * Handles deduplication by trackId + plateText.
  */
-export function useAiAnpr() {
+export function useAiAnpr(cameras?: { id: string; name: string }[]) {
   const [aiAnprRecords, setAiAnprRecords] = useState<Record<string, AnprRecord>>({});
   const seenRef = useRef<Set<string>>(new Set());
 
@@ -58,11 +58,10 @@ export function useAiAnpr() {
           ? new Date(aiRec.timestamp).toISOString().substring(11, 19) + " UTC"
           : new Date().toISOString().substring(11, 19) + " UTC";
 
-        const camNames: Record<string, string> = {
-          "CAM-01": "BOP NORTH MAIN GATE",
-          "CAM-02": "BORDER ROAD SECTOR 3",
-          "CAM-03": "CHECK POST VEHICLE LANE",
-        };
+        const camNames: Record<string, string> = (cameras || []).reduce<Record<string, string>>((acc, c) => {
+          acc[c.id] = c.name;
+          return acc;
+        }, {});
 
         const rec: AnprRecord = {
           id: aiRec.id,
@@ -88,7 +87,7 @@ export function useAiAnpr() {
 
       return next;
     });
-  }, []);
+  }, [cameras]);
 
   const aiAnprArray: AnprRecord[] = Object.values(aiAnprRecords);
 

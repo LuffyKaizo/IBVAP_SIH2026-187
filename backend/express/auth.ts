@@ -1,7 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-const SECRET_KEY = process.env.SECRET_KEY || 'ibvap-dev-secret-change-in-production-32chars';
+// Read lazily: server.ts imports this module before dotenv.config() runs,
+// so process.env.SECRET_KEY is not yet populated at module-evaluation time.
+function getSecretKey(): string {
+  return process.env.SECRET_KEY || 'ibvap-dev-secret-change-in-production-32chars';
+}
 
 export interface AuthUser {
   user_id: string;
@@ -37,7 +41,7 @@ export function verifyToken(req: Request, res: Response, next: NextFunction): vo
     return;
   }
   try {
-    const decoded = jwt.verify(token, SECRET_KEY) as AuthUser & { sub: string; exp: number };
+    const decoded = jwt.verify(token, getSecretKey()) as AuthUser & { sub: string; exp: number };
     req.user = {
       user_id: decoded.sub || decoded.user_id,
       email: decoded.email,
@@ -71,7 +75,7 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction): v
   }
   const token = authHeader.substring(7);
   try {
-    const decoded = jwt.verify(token, SECRET_KEY) as AuthUser & { sub: string };
+    const decoded = jwt.verify(token, getSecretKey()) as AuthUser & { sub: string };
     req.user = {
       user_id: decoded.sub || decoded.user_id,
       email: decoded.email,

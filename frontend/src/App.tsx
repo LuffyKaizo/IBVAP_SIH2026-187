@@ -48,7 +48,7 @@ export const AppInner: React.FC = () => {
     return fetch(url, { ...init, headers });
   }, [getAuthHeaders]);
   const [currentPath, setCurrentPath] = useState<NavPath>('command-dashboard');
-  const [selectedCameraId, setSelectedCameraId] = useState<string>('CAM-04');
+  const [selectedCameraId, setSelectedCameraId] = useState<string>('');
   const [selectedAlertId, setSelectedAlertId] = useState<string>('ALT-8821');
   const [isOperational, setIsOperational] = useState(true);
 
@@ -86,7 +86,7 @@ export const AppInner: React.FC = () => {
 
   // AI alert integration
   const { aiAlerts, processMetadata: processAiMetadata, handleAction: handleAiAlertAction, clearAlerts: clearAiAlerts } = useAiAlerts();
-  const { aiAnprRecords, processMetadata: processAiAnprMetadata } = useAiAnpr();
+  const { aiAnprRecords, processMetadata: processAiAnprMetadata } = useAiAnpr(cameras);
 
   // Combined metadata processor for alerts, ANPR, hourly activity, and suspicious events
   const processAllAiMetadata = useCallback((metadata: any) => {
@@ -219,6 +219,12 @@ export const AppInner: React.FC = () => {
     return () => clearInterval(statsInterval);
   }, [fetchCameras, fetchAlerts, fetchDashboardStats, fetchReports, fetchZones]);
 
+  // Default selected camera to the first registered camera once known
+  useEffect(() => {
+    if (cameras.length === 0) return;
+    setSelectedCameraId((prev) => (prev && cameras.some((c) => c.id === prev) ? prev : cameras[0].id));
+  }, [cameras]);
+
   // Global Ctrl+K
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -239,41 +245,56 @@ export const AppInner: React.FC = () => {
     handleAiAlertAction(id, action);
   };
 
-  const handleAddCamera = async (newCam: { camera_id: string; name: string; source: string; source_type: string; location: string; camera_type?: string }) => {
+  const handleAddCamera = async (newCam: { camera_id: string; name: string; source: string; source_type: string; location: string; camera_type?: string }): Promise<{ success: boolean; message?: string }> => {
     try {
       const res = await authFetch('/api/cameras', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newCam),
       });
-      if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && !(data as any)?.error) {
         await fetchCameras();
+        return { success: true };
       }
-    } catch { /* ignore */ }
+      return { success: false, message: (data as any)?.error || (data as any)?.detail || `Registration failed (HTTP ${res.status})` };
+    } catch (err) {
+      return { success: false, message: `Backend unreachable: ${err instanceof Error ? err.message : 'network error'}` };
+    }
   };
 
-  const handleReplaceCamera = async (cameraId: string, source: string, sourceType: string) => {
+  const handleReplaceCamera = async (cameraId: string, source: string, sourceType: string): Promise<{ success: boolean; message?: string }> => {
     try {
       const res = await authFetch(`/api/cameras/${cameraId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source, source_type: sourceType }),
       });
-      if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && !(data as any)?.error) {
         await fetchCameras();
+        return { success: true };
       }
-    } catch { /* ignore */ }
+      return { success: false, message: (data as any)?.error || (data as any)?.detail || `Update failed (HTTP ${res.status})` };
+    } catch (err) {
+      return { success: false, message: `Backend unreachable: ${err instanceof Error ? err.message : 'network error'}` };
+    }
   };
 
-  const handleDeleteCamera = async (cameraId: string) => {
+  const handleDeleteCamera = async (cameraId: string): Promise<{ success: boolean; message?: string }> => {
     try {
       const res = await authFetch(`/api/cameras/${cameraId}`, {
         method: 'DELETE',
       });
-      if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && !(data as any)?.error) {
         await fetchCameras();
+        return { success: true };
       }
-    } catch { /* ignore */ }
+      return { success: false, message: (data as any)?.error || (data as any)?.detail || `Delete failed (HTTP ${res.status})` };
+    } catch (err) {
+      return { success: false, message: `Backend unreachable: ${err instanceof Error ? err.message : 'network error'}` };
+    }
   };
   const handleAddAnprRecord = (newRec: AnprRecord) => { setAnprRecords((prev) => [newRec, ...prev]); };
   const handleSaveZone = (newZone: VirtualZone) => {
@@ -363,7 +384,7 @@ export const AppInner: React.FC = () => {
           <CamerasMonitoringView cameras={cameras} selectedCameraId={selectedCameraId} onSelectCamera={setSelectedCameraId} onAiMetadata={processAllAiMetadata} />
         )}
         {currentPath === 'ai-analytics' && <AiAnalyticsView />}
-        {currentPath === 'anpr' && <AnprView records={anprRecords} onAddRecord={handleAddAnprRecord} />}
+        {currentPath === 'anpr' && <AnprView records={anprRecords} cameras={cameras} onAddRecord={handleAddAnprRecord} />}
         {currentPath === 'intrusion-zones' && (
           <IntrusionZonesView zones={zones} cameras={cameras} alerts={alerts} onSaveZone={handleSaveZone} onDeleteZone={handleDeleteZone} />
         )}
@@ -380,7 +401,7 @@ export const AppInner: React.FC = () => {
         {currentPath === 'analytics' && <AnalyticsView hourlyData={hourlyActivity} />}
         {currentPath === 'reports' && <ReportsView reports={reports} onGenerateReport={handleGenerateReport} />}
         {currentPath === 'settings' && (
-          <SettingsView config={systemConfig} cameras={cameras} onSaveConfig={setSystemConfig} onAddCamera={handleAddCamera} onReplaceCamera={handleReplaceCamera} onDeleteCamera={handleDeleteCamera} />
+          <SettingsView config={systemConfig} cameras={cameras} onSaveConfig={setSystemConfig} onAddCamera={handleAddCamera} onReplaceCamera={handleReplaceCamera} onDeleteCamera={handleDeleteCamera} authFetch={authFetch} />
         )}
       </main>
 
