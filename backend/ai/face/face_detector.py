@@ -30,7 +30,10 @@ from ai.config import settings
 
 # Model shipped with the repo (Apache-2.0, OpenCV Zoo).
 MODEL_FILENAME = "face_detection_yunet_2023mar.onnx"
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
+# Project-relative location under models/face/ (repo root = 3 levels up
+# from backend/ai/face/face_detector.py).
+MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..",
+                         "models", "face")
 
 
 @dataclass

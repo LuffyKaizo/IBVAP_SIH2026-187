@@ -1,7 +1,11 @@
 """License plate region detection — YOLO primary, OpenCV fallback.
 
-Primary: YOLOv8 model (license_plate_detector.pt) for high-accuracy detection.
+Primary: YOLOv8 plate detection model resolved from settings.PLATE_MODEL_PATH
+(default: models/license_plate/best.pt — active experiment).
 Fallback: Classical OpenCV contour analysis when YOLO is unavailable or fails.
+
+The previous detector (models/license_plate/license_plate_detector.pt) is
+preserved for rollback and is NOT loaded unless PLATE_MODEL_PATH points to it.
 """
 
 import cv2
@@ -22,15 +26,15 @@ class PlateCandidate:
 
 
 def _find_model() -> Optional[Path]:
-    """Search for license_plate_detector.pt in known locations."""
-    candidates = [
-        Path(settings.BASE_DIR) / "license_plate_detector.pt",
-        Path(settings.BASE_DIR).parent / "license_plate_detector.pt",
-        Path(__file__).resolve().parent.parent.parent.parent / "license_plate_detector.pt",
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
+    """Resolve the active license-plate detection model (project-relative).
+
+    Uses settings.PLATE_MODEL_PATH (default models/license_plate/best.pt).
+    Does not fall back to the previous detector — during the experiment the
+    old model must never be loaded implicitly.
+    """
+    path = Path(settings.PLATE_MODEL_PATH)
+    if path.exists():
+        return path
     return None
 
 
@@ -45,19 +49,21 @@ class PlateDetector:
         self._max_aspect = settings.ANPR_PLATE_ASPECT_MAX
         self._yolo_model = None
         self._yolo_available = False
+        self._model_path: Optional[Path] = None
         self._init_yolo()
 
     def _init_yolo(self):
-        """Try to load the YOLO plate detection model."""
+        """Try to load the active YOLO plate detection model."""
         try:
             from ultralytics import YOLO
             model_path = _find_model()
             if model_path is None:
-                print("[PLATE-DETECTOR] license_plate_detector.pt not found, using OpenCV fallback")
+                print(f"[PLATE-DETECTOR] plate model not found at {settings.PLATE_MODEL_PATH}, using OpenCV fallback")
                 return
             self._yolo_model = YOLO(str(model_path))
             self._yolo_available = True
-            print(f"[PLATE-DETECTOR] YOLO model loaded: {model_path.name}")
+            self._model_path = model_path
+            print(f"[PLATE-DETECTOR] YOLO model loaded: {model_path}")
         except ImportError:
             print("[PLATE-DETECTOR] ultralytics not installed, using OpenCV fallback")
         except Exception as e:

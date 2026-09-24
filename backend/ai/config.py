@@ -4,6 +4,11 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Repository root (project-relative; never a personal absolute path).
+# config.py lives at backend/ai/config.py -> parents[2] == repo root.
+REPO_ROOT: Path = Path(__file__).resolve().parents[2]
+MODELS_DIR: Path = REPO_ROOT / "models"
+
 
 @dataclass
 class Settings:
@@ -23,7 +28,7 @@ class Settings:
     FRAME_TIMEOUT_SECONDS: float = float(os.getenv("FRAME_TIMEOUT_SECONDS", "5"))  # stale threshold
 
     # YOLO model
-    MODEL_PATH: str = os.getenv("MODEL_PATH", "yolov8n.pt")  # n=nano, s=small, m=medium, l=large, x=xlarge
+    MODEL_PATH: str = os.getenv("MODEL_PATH", str(MODELS_DIR / "vehicle" / "yolov8n.pt"))  # n=nano, s=small, m=medium, l=large, x=xlarge
     CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.50"))
     IOU_THRESHOLD: float = float(os.getenv("IOU_THRESHOLD", "0.45"))
     IMAGE_SIZE: int = int(os.getenv("IMAGE_SIZE", "640"))
@@ -110,6 +115,10 @@ class Settings:
 
     # ANPR / License Plate Recognition
     ANPR_ENABLED: bool = os.getenv("ANPR_ENABLED", "true").lower() == "true"
+    # Active license-plate detector (experimental replacement).
+    # Rollback: point this at models/license_plate/license_plate_detector.pt
+    # or revert the integration commit.
+    PLATE_MODEL_PATH: str = os.getenv("PLATE_MODEL_PATH", str(MODELS_DIR / "license_plate" / "best.pt"))
     ANPR_OCR_ENGINE: str = os.getenv("ANPR_OCR_ENGINE", "easyocr")  # easyocr | tesseract | none
     ANPR_OCR_GPU: bool = os.getenv("ANPR_OCR_GPU", "false").lower() == "true"  # EasyOCR GPU mode
     ANPR_OCR_PASSES: int = int(os.getenv("ANPR_OCR_PASSES", "1"))  # OCR inference passes per plate (1-2)
