@@ -121,7 +121,7 @@ class Settings:
     PLATE_MODEL_PATH: str = os.getenv("PLATE_MODEL_PATH", str(MODELS_DIR / "license_plate" / "best.pt"))
     ANPR_OCR_ENGINE: str = os.getenv("ANPR_OCR_ENGINE", "easyocr")  # easyocr | tesseract | none
     ANPR_OCR_GPU: bool = os.getenv("ANPR_OCR_GPU", "false").lower() == "true"  # EasyOCR GPU mode
-    ANPR_OCR_PASSES: int = int(os.getenv("ANPR_OCR_PASSES", "1"))  # OCR inference passes per plate (1-2)
+    ANPR_OCR_PASSES: int = int(os.getenv("ANPR_OCR_PASSES", "2"))  # OCR inference passes per plate (1-2)
     ANPR_FORMAT_VALIDATION: bool = os.getenv("ANPR_FORMAT_VALIDATION", "true").lower() == "true"
     ANPR_CONTEXTUAL_CORRECTION: bool = os.getenv("ANPR_CONTEXTUAL_CORRECTION", "true").lower() == "true"
     ANPR_CONTEXTUAL_MIN_CONFIDENCE: float = float(os.getenv("ANPR_CONTEXTUAL_MIN_CONFIDENCE", "0.5"))

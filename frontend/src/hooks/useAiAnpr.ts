@@ -18,8 +18,9 @@ export function useAiAnpr(cameras?: { id: string; name: string }[]) {
       const next = { ...prev };
 
       for (const aiRec of incoming) {
-        // Surface all vehicle detections — show "PLATE NOT DETECTED" when no plate text
+        // Distinguish detection (plate box found) from recognition (text read).
         const hasPlate = !!aiRec.plateText;
+        const hasPlateBox = !!aiRec.plateBbox;
 
         // Dedup by trackId (with plate text if available)
         const dedupKey = hasPlate
@@ -66,7 +67,11 @@ export function useAiAnpr(cameras?: { id: string; name: string }[]) {
         const rec: AnprRecord = {
           id: aiRec.id,
           timestamp,
-          plateNumber: hasPlate ? aiRec.plateText : "PLATE NOT DETECTED",
+          plateNumber: hasPlate
+            ? aiRec.plateText
+            : hasPlateBox
+              ? "PLATE DETECTED"
+              : "PLATE NOT DETECTED",
           vehicleType: vehicleTypeMap[aiRec.vehicleClass] || "Sedan",
           confidence: hasPlate
             ? Math.round(aiRec.ocrConfidence || aiRec.plateConfidence)
