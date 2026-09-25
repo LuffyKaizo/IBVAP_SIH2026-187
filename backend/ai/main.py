@@ -744,6 +744,40 @@ async def websocket_tracking(websocket: WebSocket, camera_id: str):
 # Zones
 # ──────────────────────────────────────────────────────────────────
 
+async def _refresh_camera_zones(camera_id: str):
+    """Push the persisted zone list for a camera into its live pipeline.
+
+    Called after any zone create/update/delete so running pipelines pick up
+    changes immediately — without requiring a backend restart.
+    """
+    if not (_zone_repo and is_available() and camera_manager and camera_id):
+        return
+    pipeline = camera_manager._pipelines.get(camera_id)
+    if pipeline:
+        all_zones = await _zone_repo.list_for_camera(camera_id)
+        pipeline.set_zones(all_zones)
+
+
+def _validate_zone_payload(req: dict):
+    """Validate zone payload shape before persistence (never crash the AI)."""
+    zone_type = req.get("zone_type", "POLYGON_ZONE")
+    points = req.get("points", [])
+    if not isinstance(points, list):
+        raise HTTPException(status_code=422, detail="points must be a list")
+    for p in points:
+        if (not isinstance(p, dict) or "x" not in p or "y" not in p
+                or not isinstance(p["x"], (int, float))
+                or not isinstance(p["y"], (int, float))):
+            raise HTTPException(status_code=422, detail="each point must be {x, y} numbers (normalized 0-1)")
+    if zone_type == "TRIPWIRE_LINE":
+        if len(points) < 2:
+            raise HTTPException(status_code=422, detail="tripwire requires at least 2 points")
+    elif len(points) < 3:
+        raise HTTPException(status_code=422, detail="polygon zone requires at least 3 points")
+    if not str(req.get("camera_id", "")).strip():
+        raise HTTPException(status_code=422, detail="camera_id is required")
+
+
 @app.get("/zones")
 async def get_zones(
     camera_id: Optional[str] = Query(None),
@@ -782,10 +816,11 @@ async def create_zone(
     req: dict,
     _user: UserContext = Depends(require_permission(Permission.ZONE_WRITE)),
 ):
-    """Create a new zone."""
-    from ai.events.engine import Zone
-    zone = Zone(
-        id=req.get("id", f"ZONE-{str(uuid.uuid4())[:8]}"),
+    """Create or update (upsert) a zone, then refresh the live camera pipeline."""
+    from ai.events.engine import Zone as ZoneCls
+    _validate_zone_payload(req)
+    zone = ZoneCls(
+        id=req.get("id") or f"ZONE-{str(uuid.uuid4())[:8]}",
         camera_id=req.get("camera_id", ""),
         name=req.get("name", "Unnamed Zone"),
         points=req.get("points", []),
@@ -795,15 +830,25 @@ async def create_zone(
         rule=req.get("rule", "RESTRICTED_ENTRY"),
     )
     if _zone_repo and is_available():
-        created = await _zone_repo.create(zone)
-        if created:
-            # Update the running pipeline with new zones
-            if camera_manager:
-                pipeline = camera_manager._pipelines.get(zone.camera_id)
-                if pipeline:
-                    all_zones = await _zone_repo.list_for_camera(zone.camera_id)
-                    pipeline.set_zones(all_zones)
-            return {"success": True, "zone": created.__dict__}
+        existing = await _zone_repo.get(zone.id)
+        if existing:
+            saved = await _zone_repo.update(
+                zone.id,
+                camera_id=zone.camera_id,
+                name=zone.name,
+                points=zone.points,
+                enabled=zone.enabled,
+                severity=zone.severity,
+            )
+            # Zone may have moved cameras — refresh both pipelines
+            if existing.camera_id and existing.camera_id != zone.camera_id:
+                await _refresh_camera_zones(existing.camera_id)
+        else:
+            saved = await _zone_repo.create(zone)
+        if saved:
+            await _refresh_camera_zones(saved.camera_id)
+            return {"success": True, "zone": saved.__dict__}
+        raise HTTPException(status_code=500, detail="Failed to persist zone")
     return {"success": True, "zone": zone.__dict__}
 
 
@@ -812,11 +857,17 @@ async def delete_zone(
     zone_id: str,
     _user: UserContext = Depends(require_permission(Permission.ZONE_WRITE)),
 ):
-    """Delete a zone."""
+    """Delete a zone and stop intrusion evaluation for it immediately."""
     if _zone_repo and is_available():
+        existing = await _zone_repo.get(zone_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Zone not found")
         deleted = await _zone_repo.delete(zone_id)
         if deleted:
+            # Stop future intrusion alerts from this zone right away
+            await _refresh_camera_zones(existing.camera_id)
             return {"success": True, "zone_id": zone_id}
+        raise HTTPException(status_code=500, detail="Failed to delete zone")
     return {"error": "Zone not found"}
 
 

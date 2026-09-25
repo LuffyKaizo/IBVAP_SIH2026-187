@@ -413,31 +413,56 @@ async function startServer() {
   });
 
   // Save / Update Virtual Zone (ADMIN, OPERATOR)
-  app.post('/api/zones', verifyToken, requireRole('ADMIN', 'OPERATOR'), (req, res) => {
+  // Proxies to FastAPI /zones (upsert) so zones persist in the database and
+  // the live AI pipelines pick them up. In-memory store is a fallback only
+  // when the AI backend is unreachable.
+  app.post('/api/zones', verifyToken, requireRole('ADMIN', 'OPERATOR'), async (req, res) => {
+    try {
+      const resp = await fetch(AI_URL + '/zones', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: req.headers.authorization || '',
+        },
+        body: JSON.stringify(req.body),
+      });
+      const data = await resp.json().catch(() => ({}));
+      res.status(resp.status).json(data);
+      return;
+    } catch {
+      // Fallback: AI backend unreachable — keep legacy in-memory behavior
+    }
     const newZone: VirtualZone = {
-      id: `ZONE-0${zonesStore.length + 1}`,
+      id: req.body.id || `ZONE-${Date.now().toString(36).toUpperCase()}`,
       name: req.body.name || `CUSTOM_ZONE_${zonesStore.length + 1}`,
-      cameraId: req.body.cameraId || 'CAM-04',
-      type: req.body.type || 'POLYGON_ZONE',
-      coordinates: req.body.coordinates || [
-        { x: 25, y: 25 },
-        { x: 75, y: 25 },
-        { x: 75, y: 75 },
-        { x: 25, y: 75 },
-      ],
+      cameraId: req.body.cameraId || req.body.camera_id || 'CAM-04',
+      type: req.body.type || req.body.zone_type || 'POLYGON_ZONE',
+      coordinates: req.body.coordinates || (req.body.points || []).map((p: any) => ({ x: p.x * 100, y: p.y * 100 })),
       severity: req.body.severity || 'HIGH',
       rule: req.body.rule || 'RESTRICTED_ENTRY',
       loiteringThresholdSec: req.body.loiteringThresholdSec || 20,
-      isActive: true,
+      isActive: req.body.enabled !== false,
       color: req.body.severity === 'CRITICAL' ? '#ef4444' : req.body.severity === 'HIGH' ? '#f97316' : '#eab308',
     };
     zonesStore.push(newZone);
     res.json({ success: true, zone: newZone });
   });
 
-  // Delete Virtual Zone (ADMIN, OPERATOR)
-  app.delete('/api/zones/:id', verifyToken, requireRole('ADMIN', 'OPERATOR'), (req, res) => {
-    const { id } = req.params;
+  // Delete Virtual Zone (ADMIN, OPERATOR) — proxied so the live pipeline
+  // stops evaluating the deleted zone immediately.
+  app.delete('/api/zones/:id', verifyToken, requireRole('ADMIN', 'OPERATOR'), async (req, res) => {
+    const id = String(req.params.id || '');
+    try {
+      const resp = await fetch(AI_URL + '/zones/' + encodeURIComponent(id), {
+        method: 'DELETE',
+        headers: { Authorization: req.headers.authorization || '' },
+      });
+      const data = await resp.json().catch(() => ({}));
+      res.status(resp.status).json(data);
+      return;
+    } catch {
+      // Fallback: AI backend unreachable — legacy in-memory behavior
+    }
     zonesStore = zonesStore.filter(z => z.id !== id);
     res.json({ success: true });
   });

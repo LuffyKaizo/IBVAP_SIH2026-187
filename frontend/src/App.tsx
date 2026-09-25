@@ -298,24 +298,34 @@ export const AppInner: React.FC = () => {
   };
   const handleAddAnprRecord = (newRec: AnprRecord) => { setAnprRecords((prev) => [newRec, ...prev]); };
   const handleSaveZone = (newZone: VirtualZone) => {
-    setZones((prev) => { const idx = prev.findIndex((z) => z.id === newZone.id); if (idx >= 0) { const c = [...prev]; c[idx] = newZone; return c; } return [newZone, ...prev]; });
-    // Persist to backend
+    // Guard against id collisions with zones on OTHER cameras (e.g. generated ids).
+    const clash = zones.find((z) => z.id === newZone.id && z.cameraId !== newZone.cameraId);
+    const zone = clash
+      ? { ...newZone, id: `ZONE-${Date.now().toString(36).toUpperCase()}` }
+      : newZone;
+    setZones((prev) => { const idx = prev.findIndex((z) => z.id === zone.id); if (idx >= 0) { const c = [...prev]; c[idx] = zone; return c; } return [zone, ...prev]; });
+    // Persist to backend, then resync from server truth
     authFetch('/api/zones', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        id: newZone.id,
-        camera_id: newZone.cameraId,
-        name: newZone.name,
-        points: (newZone.coordinates || []).map((c) => ({ x: c.x / 100, y: c.y / 100 })),
-        enabled: newZone.isActive,
-        severity: newZone.severity,
-        zone_type: newZone.type,
-        rule: newZone.rule,
+        id: zone.id,
+        camera_id: zone.cameraId,
+        name: zone.name,
+        points: (zone.coordinates || []).map((c) => ({ x: c.x / 100, y: c.y / 100 })),
+        enabled: zone.isActive,
+        severity: zone.severity,
+        zone_type: zone.type,
+        rule: zone.rule,
       }),
-    }).catch(() => {});
+    }).then((res) => { if (res.ok) fetchZones(); }).catch(() => {});
   };
-  const handleDeleteZone = (id: string) => { setZones((prev) => prev.filter((z) => z.id !== id)); };
+  const handleDeleteZone = (id: string) => {
+    setZones((prev) => prev.filter((z) => z.id !== id));
+    authFetch(`/api/zones/${id}`, { method: 'DELETE' })
+      .then((res) => { if (res.ok) fetchZones(); })
+      .catch(() => {});
+  };
   const handleGenerateReport = (newReport: Partial<SurveillanceReportItem>) => { setReports((prev) => [newReport as SurveillanceReportItem, ...prev]); };
 
   const handleLogin = (_username: string, _role = 'DUTY COMMANDER') => {
@@ -373,6 +383,7 @@ export const AppInner: React.FC = () => {
             stats={dashboardStats}
             alerts={[...alerts.filter(a => !a.source || a.source !== "AI"), ...aiAlerts]}
             cameras={cameras}
+            zones={zones}
             onNavigate={setCurrentPath}
             onSelectCamera={handleSelectCamera}
             onSelectAlert={handleSelectAlert}
@@ -381,7 +392,15 @@ export const AppInner: React.FC = () => {
           />
         )}
         {currentPath === 'cameras' && (
-          <CamerasMonitoringView cameras={cameras} selectedCameraId={selectedCameraId} onSelectCamera={setSelectedCameraId} onAiMetadata={processAllAiMetadata} />
+          <CamerasMonitoringView
+            cameras={cameras}
+            zones={zones}
+            selectedCameraId={selectedCameraId}
+            onSelectCamera={setSelectedCameraId}
+            onAiMetadata={processAllAiMetadata}
+            onSaveZone={handleSaveZone}
+            onDeleteZone={handleDeleteZone}
+          />
         )}
         {currentPath === 'ai-analytics' && <AiAnalyticsView />}
         {currentPath === 'anpr' && <AnprView records={anprRecords} cameras={cameras} onAddRecord={handleAddAnprRecord} />}

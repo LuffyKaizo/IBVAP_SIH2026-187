@@ -1,9 +1,11 @@
 import React from "react";
-import type { AiTrackedObject, TrackContext } from "../types";
+import type { AiTrackedObject, TrackContext, AiSecurityEvent } from "../types";
 
 interface AIBoundingBoxOverlayProps {
   detections: AiTrackedObject[];
   trackContext?: TrackContext[];
+  /** Active security events; intrusion tracks render with red borders. */
+  events?: AiSecurityEvent[];
 }
 
 const CLASS_COLORS: Record<string, { border: string; bg: string; label: string }> = {
@@ -16,7 +18,11 @@ const CLASS_COLORS: Record<string, { border: string; bg: string; label: string }
 
 const DEFAULT_COLOR = { border: "#356B7A", bg: "rgba(53,107,122,0.12)", label: "OBJECT" };
 
-export const AIBoundingBoxOverlay: React.FC<AIBoundingBoxOverlayProps> = ({ detections, trackContext }) => {
+const INTRUSION_COLOR = { border: "#EF4444", bg: "rgba(239,68,68,0.16)", label: "INTRUSION" };
+
+const INTRUSION_EVENT_TYPES = new Set(["PERSON_INTRUSION", "VEHICLE_INTRUSION"]);
+
+export const AIBoundingBoxOverlay: React.FC<AIBoundingBoxOverlayProps> = ({ detections, trackContext, events }) => {
   if (!detections || detections.length === 0) return null;
 
   const ctxMap = new Map<number, TrackContext>();
@@ -26,10 +32,22 @@ export const AIBoundingBoxOverlay: React.FC<AIBoundingBoxOverlayProps> = ({ dete
     }
   }
 
+  // Track IDs currently breaching an intrusion zone (red rendering trigger).
+  const intrusionTracks = new Set<number>();
+  if (events) {
+    for (const ev of events) {
+      if (INTRUSION_EVENT_TYPES.has(ev.event_type) && ev.status !== "RESOLVED") {
+        intrusionTracks.add(ev.track_id);
+      }
+    }
+  }
+
   return (
     <>
       {detections.map((det, idx) => {
-        const color = CLASS_COLORS[det.class_name] || DEFAULT_COLOR;
+        const intruding = intrusionTracks.has(det.track_id);
+        const base = CLASS_COLORS[det.class_name] || DEFAULT_COLOR;
+        const color = intruding ? { ...base, border: INTRUSION_COLOR.border, bg: INTRUSION_COLOR.bg } : base;
         const left = det.bbox.x1 * 100;
         const top = det.bbox.y1 * 100;
         const width = (det.bbox.x2 - det.bbox.x1) * 100;
@@ -79,8 +97,29 @@ export const AIBoundingBoxOverlay: React.FC<AIBoundingBoxOverlayProps> = ({ dete
             >
               {color.label} #{det.track_id} | {confidence}%
             </div>
+            {/* Intrusion sublabel (takes precedence over context chip) */}
+            {intruding && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "-34px",
+                  left: 0,
+                  padding: "1px 5px",
+                  fontSize: "9px",
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontWeight: 700,
+                  whiteSpace: "nowrap",
+                  borderRadius: "3px",
+                  backgroundColor: "#EF4444",
+                  color: "#fff",
+                  lineHeight: "12px",
+                }}
+              >
+                INTRUSION
+              </div>
+            )}
             {/* Context sublabel */}
-            {hasContext && contextLabel && (
+            {!intruding && hasContext && contextLabel && (
               <div
                 style={{
                   position: "absolute",

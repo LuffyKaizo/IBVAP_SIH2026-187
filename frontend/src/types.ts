@@ -226,6 +226,29 @@ export interface AiTrackingMetadata {
   /** Capture-layer health (RTSP/CCTV), present when the pipeline runs. */
   camera?: AiCameraHealth;
   track_context?: TrackContext[];
+  /** Active security events (incl. zone intrusion) from the AI event engine. */
+  events?: AiSecurityEvent[];
+}
+
+/** Serialized SecurityEvent from the backend event engine (pipeline metadata). */
+export interface AiSecurityEvent {
+  event_id: string;
+  event_type: string;
+  severity: string;
+  camera_id: string;
+  zone_id: string;
+  zone_name: string;
+  track_id: number;
+  object_class: string;
+  timestamp: string;
+  confidence: number;
+  bbox: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  };
+  status: 'DETECTED' | 'ACTIVE' | 'RESOLVED';
 }
 
 export interface TrackContext {

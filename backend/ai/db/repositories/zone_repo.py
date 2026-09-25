@@ -24,6 +24,8 @@ class ZoneRepository:
             points=model.points if isinstance(model.points, list) else [],
             enabled=model.enabled,
             severity=model.severity,
+            created_at=model.created_at.isoformat() if model.created_at else None,
+            updated_at=model.updated_at.isoformat() if model.updated_at else None,
         )
 
     async def create(self, zone: Zone) -> Optional[Zone]:
@@ -65,10 +67,13 @@ class ZoneRepository:
         return await db_operation("zone.list_all", _list) or []
 
     async def update(self, zone_id: str, **fields) -> Optional[Zone]:
+        # Only allow updating real columns — Zone carries transient fields
+        # (zone_type, rule, created_at) that do not exist on the table.
+        _allowed = {c.name for c in ZoneModel.__table__.columns} - {"id", "created_at"}
+
         async def _update(session):
             fields["updated_at"] = datetime.now(timezone.utc)
-            protected = {"id", "created_at"}
-            update_fields = {k: v for k, v in fields.items() if k not in protected}
+            update_fields = {k: v for k, v in fields.items() if k in _allowed}
             if not update_fields:
                 return await self.get(zone_id)
             await session.execute(

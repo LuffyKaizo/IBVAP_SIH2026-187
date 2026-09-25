@@ -32,8 +32,13 @@ export const IntrusionZonesView: React.FC<IntrusionZonesViewProps> = ({
   const activeZone = zones.find((z) => z.id === selectedZoneId) || zones[0];
 
   const handleCreateZone = () => {
+    // Collision-safe id (previous length-based ids could overwrite existing zones)
+    let generatedId = `ZONE-${Date.now().toString(36).toUpperCase()}`;
+    while (zones.some((z) => z.id === generatedId)) {
+      generatedId = `ZONE-${Date.now().toString(36).toUpperCase()}${Math.floor(Math.random() * 90 + 10)}`;
+    }
     const newZone: VirtualZone = {
-      id: `ZONE-0${zones.length + 1}`,
+      id: generatedId,
       name: zoneName.trim().toUpperCase(),
       cameraId: selectedCameraId,
       type: zoneType,

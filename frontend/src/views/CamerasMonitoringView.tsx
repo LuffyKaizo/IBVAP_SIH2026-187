@@ -1,19 +1,23 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { CameraFeed, AiTrackingMetadata, AiTrackedObject, AiFaceDetection, TrackContext, AiCameraStatus } from '../types';
+import { CameraFeed, AiTrackingMetadata, AiTrackedObject, AiFaceDetection, TrackContext, AiCameraStatus, VirtualZone } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { AIBoundingBoxOverlay } from '../components/AIBoundingBoxOverlay';
 import { AIFaceOverlay } from '../components/AIFaceOverlay';
+import { useIntrusionZoneController, IntrusionZoneLayer, IntrusionZoneButton, ZoneManageMenu } from '../components/IntrusionZoneLayer';
 
 interface CamerasMonitoringViewProps {
   cameras: CameraFeed[];
+  zones: VirtualZone[];
   selectedCameraId?: string;
   onSelectCamera?: (id: string) => void;
   onAiMetadata?: (metadata: AiTrackingMetadata) => void;
+  onSaveZone?: (zone: VirtualZone) => void;
+  onDeleteZone?: (id: string) => void;
 }
 
 type ViewMode = 'grid' | 'single';
-type ContextMenuAction = 'open' | 'fullscreen' | 'analysis' | 'alerts' | 'anpr' | 'ai-toggle';
+type ContextMenuAction = 'open' | 'fullscreen' | 'analysis' | 'alerts' | 'anpr' | 'ai-toggle' | 'zone';
 
 interface ContextMenuState {
   cameraId: string;
@@ -134,14 +138,17 @@ function useCameraTileStream(cameraId: string, token: string | null) {
 interface CameraTileProps {
   camera: CameraFeed;
   token: string | null;
+  zones: VirtualZone[];
   onOpen: (id: string) => void;
   onContextMenu: (cameraId: string, x: number, y: number) => void;
   onAiMetadata?: (metadata: AiTrackingMetadata) => void;
   onToggleAi?: (cameraId: string, enabled: boolean) => void;
   onAiStateChange?: (cameraId: string, enabled: boolean) => void;
+  onSaveZone?: (zone: VirtualZone) => void;
+  onDeleteZone?: (id: string) => void;
 }
 
-const CameraTile: React.FC<CameraTileProps> = ({ camera, token, onOpen, onContextMenu, onAiMetadata, onToggleAi, onAiStateChange }) => {
+const CameraTile: React.FC<CameraTileProps> = ({ camera, token, zones, onOpen, onContextMenu, onAiMetadata, onToggleAi, onAiStateChange, onSaveZone, onDeleteZone }) => {
   const stream = useCameraTileStream(camera.id, token);
   const isRealAi = stream.metadata?.ai_enabled !== undefined
     ? stream.metadata.ai_enabled && stream.isConnected
@@ -149,8 +156,15 @@ const CameraTile: React.FC<CameraTileProps> = ({ camera, token, onOpen, onContex
   const detections = stream.metadata?.detections || [];
   const faces = stream.metadata?.faces || [];
   const trackContext = stream.metadata?.track_context || [];
+  const events = stream.metadata?.events || [];
   const aiProcessing = stream.status?.ai_processing ?? false;
   const health = stream.status?.camera;
+  const zoneCtl = useIntrusionZoneController({
+    cameraId: camera.id,
+    zones,
+    onSaveZone: onSaveZone || (() => {}),
+    onDeleteZone: onDeleteZone || (() => {}),
+  });
 
   useEffect(() => {
     if (stream.metadata && onAiMetadata) {
@@ -200,6 +214,7 @@ const CameraTile: React.FC<CameraTileProps> = ({ camera, token, onOpen, onContex
           >
             {stream.aiEnabled ? 'AI ON' : 'AI OFF'}
           </button>
+          <IntrusionZoneButton controller={zoneCtl} compact />
         </div>
       </div>
 
@@ -210,8 +225,9 @@ const CameraTile: React.FC<CameraTileProps> = ({ camera, token, onOpen, onContex
           alt={camera.name}
           className="w-full h-full object-cover"
         />
+        <IntrusionZoneLayer controller={zoneCtl} />
         {isRealAi && (
-          <AIBoundingBoxOverlay detections={detections} trackContext={trackContext} />
+          <AIBoundingBoxOverlay detections={detections} trackContext={trackContext} events={events} />
         )}
         {isRealAi && (
           <AIFaceOverlay faces={faces} />
@@ -254,6 +270,7 @@ const CameraTile: React.FC<CameraTileProps> = ({ camera, token, onOpen, onContex
           Open <span className="material-symbols-outlined text-[11px]">chevron_right</span>
         </span>
       </div>
+      {zoneCtl.menuPos && <ZoneManageMenu controller={zoneCtl} />}
     </div>
   );
 };
@@ -264,13 +281,18 @@ interface SingleCameraViewProps {
   camera: CameraFeed;
   cameras: CameraFeed[];
   token: string | null;
+  zones: VirtualZone[];
   onSelectCamera: (id: string) => void;
   onBack: () => void;
   onAiMetadata?: (metadata: AiTrackingMetadata) => void;
   onToggleAi?: (cameraId: string, enabled: boolean) => void;
+  onSaveZone?: (zone: VirtualZone) => void;
+  onDeleteZone?: (id: string) => void;
+  pendingCreate?: boolean;
+  onPendingCreateHandled?: () => void;
 }
 
-const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, token, onSelectCamera, onBack, onAiMetadata, onToggleAi }) => {
+const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, token, zones, onSelectCamera, onBack, onAiMetadata, onToggleAi, onSaveZone, onDeleteZone, pendingCreate, onPendingCreateHandled }) => {
   const stream = useCameraTileStream(camera.id, token);
   const [isNightFilter, setIsNightFilter] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -289,8 +311,24 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
   const detections = stream.metadata?.detections || [];
   const faces = stream.metadata?.faces || [];
   const trackContext = stream.metadata?.track_context || [];
+  const events = stream.metadata?.events || [];
   const aiProcessing = stream.status?.ai_processing ?? false;
   const health = stream.status?.camera;
+  const zoneCtl = useIntrusionZoneController({
+    cameraId: camera.id,
+    zones,
+    onSaveZone: onSaveZone || (() => {}),
+    onDeleteZone: onDeleteZone || (() => {}),
+  });
+
+  // Context-menu "Create Zone" deep-link: enter create mode once ready.
+  useEffect(() => {
+    if (pendingCreate) {
+      zoneCtl.startCreate();
+      onPendingCreateHandled?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCreate, camera.id]);
 
   useEffect(() => {
     if (stream.metadata && onAiMetadata) {
@@ -422,7 +460,8 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
                 }}
               />
               {isNightFilter && <div className="absolute inset-0 bg-emerald-950/30 mix-blend-color pointer-events-none" />}
-              {isRealAi && <AIBoundingBoxOverlay detections={detections} trackContext={trackContext} />}
+              <IntrusionZoneLayer controller={zoneCtl} />
+              {isRealAi && <AIBoundingBoxOverlay detections={detections} trackContext={trackContext} events={events} />}
               {isRealAi && <AIFaceOverlay faces={faces} />}
               {!stream.isConnected && (
                 <div className="absolute inset-0 flex items-center justify-center bg-surface-container/80">
@@ -516,6 +555,7 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
                   className={`px-3 py-1.5 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-colors ${stream.aiEnabled ? 'bg-success-container text-success border-success/30' : 'bg-surface hover:bg-surface-container-high border-outline-variant text-on-surface'}`}>
                   <span className="material-symbols-outlined text-[14px]">smart_toy</span> AI {stream.aiEnabled ? 'ON' : 'OFF'}
                 </button>
+                <IntrusionZoneButton controller={zoneCtl} />
                 <button onClick={handleTakeSnapshot}
                   className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-container-high border border-outline-variant text-[11px] text-on-surface font-semibold flex items-center gap-1.5 cursor-pointer transition-colors">
                   <span className="material-symbols-outlined text-[14px] text-primary">photo_camera</span> Snapshot
@@ -695,7 +735,8 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
                 transform: `scale(${ptzPan.zoom}) translate(${ptzPan.pan}px, ${ptzPan.tilt}px)`,
                 filter: isNightFilter ? 'grayscale(75%) brightness(1.2) contrast(1.2) hue-rotate(90deg)' : 'none' }} />
             {isNightFilter && <div style={{ position: 'absolute', inset: 0, background: 'rgba(2,44,30,0.3)', mixBlendMode: 'color', pointerEvents: 'none' }} />}
-            {isRealAi && <AIBoundingBoxOverlay detections={detections} trackContext={trackContext} />}
+            <IntrusionZoneLayer controller={zoneCtl} />
+            {isRealAi && <AIBoundingBoxOverlay detections={detections} trackContext={trackContext} events={events} />}
             {isRealAi && <AIFaceOverlay faces={faces} />}
 
             {/* Fullscreen PTZ Overlay - bottom right */}
@@ -799,6 +840,7 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
           </div>
         </div>, document.body
       )}
+      {zoneCtl.menuPos && <ZoneManageMenu controller={zoneCtl} />}
     </div>
   );
 };
@@ -807,15 +849,19 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
 
 export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
   cameras,
+  zones,
   selectedCameraId,
   onSelectCamera,
   onAiMetadata,
+  onSaveZone,
+  onDeleteZone,
 }) => {
   const { token } = useAuth();
   const [viewMode, setViewMode] = useState<ViewMode>(selectedCameraId ? 'single' : 'grid');
   const [activeCameraId, setActiveCameraId] = useState<string | null>(selectedCameraId || null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [analysisCameraId, setAnalysisCameraId] = useState<string | null>(null);
+  const [zoneCreatePending, setZoneCreatePending] = useState<string | null>(null);
   const cameraAiStatesRef = useRef<Record<string, boolean>>({});
 
   // Sync with parent-selected camera
@@ -895,8 +941,16 @@ export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
         handleToggleAi(cid, !currentAi);
         break;
       }
+      case 'zone': {
+        // Deep-link straight into create mode only when this camera has no zone yet.
+        if (!zones.some((z) => z.cameraId === cid)) {
+          setZoneCreatePending(cid);
+        }
+        handleOpenCamera(cid);
+        break;
+      }
     }
-  }, [contextMenu, handleOpenCamera, handleToggleAi]);
+  }, [contextMenu, handleOpenCamera, handleToggleAi, zones]);
 
   // Close context menu on click outside
   useEffect(() => {
@@ -935,10 +989,15 @@ export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
         camera={activeCamera}
         cameras={cameras}
         token={token}
+        zones={zones}
         onSelectCamera={handleOpenCamera}
         onBack={handleBackToGrid}
         onAiMetadata={onAiMetadata}
         onToggleAi={handleToggleAi}
+        onSaveZone={onSaveZone}
+        onDeleteZone={onDeleteZone}
+        pendingCreate={zoneCreatePending === activeCamera.id}
+        onPendingCreateHandled={() => setZoneCreatePending(null)}
       />
     );
   }
@@ -978,11 +1037,14 @@ export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
             key={camera.id}
             camera={camera}
             token={token}
+            zones={zones}
             onOpen={handleOpenCamera}
             onContextMenu={handleContextMenu}
             onAiMetadata={onAiMetadata}
             onToggleAi={handleToggleAi}
             onAiStateChange={handleAiStateChange}
+            onSaveZone={onSaveZone}
+            onDeleteZone={onDeleteZone}
           />
         ))}
       </div>
@@ -1010,6 +1072,9 @@ export const CamerasMonitoringView: React.FC<CamerasMonitoringViewProps> = ({
             <div className="border-t border-outline-variant/50 my-0.5" />
             <button onClick={() => handleContextAction('ai-toggle')} className="w-full px-3 py-2 text-left text-[11px] text-on-surface hover:bg-surface-container-high flex items-center gap-2 cursor-pointer transition-colors">
               <span className="material-symbols-outlined text-[14px]">smart_toy</span> Toggle AI
+            </button>
+            <button onClick={() => handleContextAction('zone')} className="w-full px-3 py-2 text-left text-[11px] text-on-surface hover:bg-surface-container-high flex items-center gap-2 cursor-pointer transition-colors" data-testid="ctx-menu-zone">
+              <span className="material-symbols-outlined text-[14px]">fence</span> Intrusion Zone
             </button>
           </div>
         </div>,

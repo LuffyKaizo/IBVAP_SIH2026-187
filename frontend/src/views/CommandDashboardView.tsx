@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { CameraFeed, BorderAlert, DashboardKpiStats } from '../types';
+import { CameraFeed, BorderAlert, DashboardKpiStats, VirtualZone } from '../types';
 import { NavPath } from '../components/Sidebar';
 import { useAuth } from '../contexts/AuthContext';
+import { ZonePolygons } from '../components/IntrusionZoneLayer';
 
 interface CommandDashboardViewProps {
   stats: DashboardKpiStats;
   cameras: CameraFeed[];
   alerts: BorderAlert[];
+  zones: VirtualZone[];
   onNavigate: (path: NavPath) => void;
   onSelectCamera?: (cameraId: string) => void;
   onSelectAlert: (alertId: string) => void;
@@ -19,6 +21,7 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
   stats,
   cameras,
   alerts,
+  zones,
   onNavigate,
   onSelectCamera,
   onSelectAlert,
@@ -214,6 +217,7 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {cameras.map((camera) => {
               const hasThreat = camera.detections.some((d) => d.isThreat);
+              const cameraZones = zones.filter((z) => z.cameraId === camera.id);
               return (
                 <button
                   key={camera.id}
@@ -249,6 +253,9 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
                     ) : (
                       <div className="w-full h-full flex items-center justify-center bg-surface-container text-on-surface-variant text-xs">No preview</div>
                     )}
+
+                    {/* Intrusion zone outlines (display-only) */}
+                    {cameraZones.length > 0 && <ZonePolygons zones={cameraZones} />}
 
                     {/* Bounding boxes */}
                     {camera.detections.map((det) => (
@@ -487,6 +494,9 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
               <span className="material-symbols-outlined text-[14px]">fullscreen</span> Fullscreen
             </button>
             <div className="border-t border-outline-variant/50 my-0.5" />
+            <button onClick={() => { onSelectCamera?.(contextMenu.cameraId); onNavigate('cameras'); setContextMenu(null); }} className="w-full px-3 py-2 text-left text-[11px] text-on-surface hover:bg-surface-container-high flex items-center gap-2 cursor-pointer transition-colors" data-testid="ctx-menu-zone">
+              <span className="material-symbols-outlined text-[14px]">fence</span> Intrusion Zone
+            </button>
             <button onClick={() => handleOpenReplace(contextMenu.cameraId)} className="w-full px-3 py-2 text-left text-[11px] text-on-surface hover:bg-surface-container-high flex items-center gap-2 cursor-pointer transition-colors">
               <span className="material-symbols-outlined text-[14px]">swap_horiz</span> Replace Camera
             </button>

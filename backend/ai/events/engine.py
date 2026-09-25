@@ -29,6 +29,8 @@ class Zone:
     severity: str = "CRITICAL"
     zone_type: str = "POLYGON_ZONE"  # POLYGON_ZONE | TRIPWIRE_LINE
     rule: str = "RESTRICTED_ENTRY"  # RESTRICTED_ENTRY | BI_DIRECTIONAL | LOITERING_ONLY
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 @dataclass
@@ -116,8 +118,9 @@ class EventEngine:
         self._track_missing_frames: dict[str, int] = {}  # event_key -> frames missing
         self._orphan_resolve_frames = settings.ORPHAN_RESOLVE_FRAMES
 
-    def _make_key(self, track_id, zone_id, event_type):
-        return f"{track_id}:{zone_id}:{event_type}"
+    def _make_key(self, camera_id, track_id, zone_id, event_type):
+        # Deduplication base: camera_id + zone_id + track_id (+ event type)
+        return f"{camera_id}:{track_id}:{zone_id}:{event_type}"
 
     def process_frame(self, tracking_result, camera_id, zones):
         """Process a frame's tracking results against configured zones.
@@ -180,13 +183,13 @@ class EventEngine:
         """Process a tracked object against a polygon zone."""
         x1, y1, x2, y2 = obj.bbox
         is_inside = point_in_polygon(norm_x, norm_y, zone.points)
-        state_key = self._make_key(track_id, zone.id, "")
+        state_key = self._make_key(camera_id, track_id, zone.id, "")
         was_inside = self._track_zone_state.get(state_key, False)
 
         if is_inside and not was_inside:
             event_type = "PERSON_INTRUSION" if obj.class_name == "person" else "VEHICLE_INTRUSION"
             severity = "CRITICAL" if event_type == "PERSON_INTRUSION" else "HIGH"
-            event_key = self._make_key(track_id, zone.id, event_type)
+            event_key = self._make_key(camera_id, track_id, zone.id, event_type)
 
             if event_key not in self._active_events:
                 event = SecurityEvent(
@@ -217,7 +220,7 @@ class EventEngine:
 
         elif is_inside and was_inside:
             event_type = 'PERSON_INTRUSION' if obj.class_name == 'person' else 'VEHICLE_INTRUSION'
-            event_key = self._make_key(track_id, zone.id, event_type)
+            event_key = self._make_key(camera_id, track_id, zone.id, event_type)
             if event_key in self._active_events:
                 self._active_events[event_key].status = 'ACTIVE'
                 self._active_events[event_key].timestamp = now
@@ -228,7 +231,7 @@ class EventEngine:
                 }
         elif not is_inside and was_inside:
             event_type = 'PERSON_INTRUSION' if obj.class_name == 'person' else 'VEHICLE_INTRUSION'
-            event_key = self._make_key(track_id, zone.id, event_type)
+            event_key = self._make_key(camera_id, track_id, zone.id, event_type)
             if event_key in self._active_events:
                 self._active_events[event_key].status = 'RESOLVED'
                 self._active_events[event_key].timestamp = now
@@ -250,7 +253,7 @@ class EventEngine:
             if crossed:
                 event_type = "PERSON_INTRUSION" if obj.class_name == "person" else "VEHICLE_INTRUSION"
                 severity = "CRITICAL" if zone.severity == "CRITICAL" else "HIGH"
-                event_key = self._make_key(track_id, zone.id, event_type)
+                event_key = self._make_key(camera_id, track_id, zone.id, event_type)
 
                 if event_key not in self._active_events:
                     event = SecurityEvent(
