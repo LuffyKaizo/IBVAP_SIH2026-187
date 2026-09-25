@@ -75,11 +75,14 @@ class YoloDetector:
         h, w = frame.shape[:2]
         start = time.time()
 
+        # Wide frames (4K CCTV): larger inference size for distant objects.
+        imgsz = self.img_size if w <= settings.LARGE_FRAME_WIDTH else settings.IMAGE_SIZE_LARGE
+
         results = self._model(
             frame,
             conf=self.confidence,
             iou=self.iou,
-            imgsz=self.img_size,
+            imgsz=imgsz,
             device=self.device,
             verbose=False,
         )

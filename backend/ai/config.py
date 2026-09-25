@@ -32,6 +32,10 @@ class Settings:
     CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.50"))
     IOU_THRESHOLD: float = float(os.getenv("IOU_THRESHOLD", "0.45"))
     IMAGE_SIZE: int = int(os.getenv("IMAGE_SIZE", "640"))
+    # Wide frames (e.g. 4K CCTV) need a larger inference size so distant
+    # small objects keep enough pixels to clear MIN_TRACKING_CONFIDENCE.
+    IMAGE_SIZE_LARGE: int = int(os.getenv("IMAGE_SIZE_LARGE", "960"))
+    LARGE_FRAME_WIDTH: int = int(os.getenv("LARGE_FRAME_WIDTH", "1920"))
 
     # Inference
     INFERENCE_FPS: int = int(os.getenv("INFERENCE_FPS", "10"))
@@ -69,10 +73,15 @@ class Settings:
     MIN_TRACKING_CONFIDENCE: float = float(os.getenv("MIN_TRACKING_CONFIDENCE", "0.45"))  # min det conf for tracking + YOLO inference
 
     # Detection quality filters (tuned for stock YOLOv8n on surveillance video)
-    MIN_BBOX_AREA_PCT: float = float(os.getenv("MIN_BBOX_AREA_PCT", "0.3"))  # min bbox area as % of frame
+    MIN_BBOX_AREA_PCT: float = float(os.getenv("MIN_BBOX_AREA_PCT", "0.2"))  # min bbox area as % of frame
     PERSON_MAX_ASPECT_RATIO: float = float(os.getenv("PERSON_MAX_ASPECT_RATIO", "4.0"))  # w/h ratio max for person
     PERSON_MIN_ASPECT_RATIO: float = float(os.getenv("PERSON_MIN_ASPECT_RATIO", "0.2"))  # w/h ratio min for person
     TEMPORAL_CONFIRM_FRAMES: int = int(os.getenv("TEMPORAL_CONFIRM_FRAMES", "2"))  # frames required before showing detection
+    # Static detection suppression rejects real stationary objects (standing
+    # people, queued vehicles) after ~10 observations. Keep machinery for the
+    # tree/pole FP use-case but disabled by default — surveillance targets
+    # legitimately stand still.
+    STATIC_SUPPRESSION_ENABLED: bool = os.getenv("STATIC_SUPPRESSION_ENABLED", "false").lower() == "true"
 
     # Behavior engine
     LOITERING_THRESHOLD_SECONDS: int = int(os.getenv("LOITERING_THRESHOLD_SECONDS", "30"))

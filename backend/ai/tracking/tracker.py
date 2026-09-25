@@ -117,13 +117,17 @@ class ObjectTracker:
         h, w = frame.shape[:2]
         total_start = time.time()
 
+        # Wide frames (4K CCTV): infer at a larger size so distant/small
+        # objects retain enough pixels to clear the confidence gate.
+        imgsz = self.img_size if w <= settings.LARGE_FRAME_WIDTH else settings.IMAGE_SIZE_LARGE
+
         # Run YOLO with tracking
         det_start = time.time()
         results = self._model.track(
             frame,
             conf=self.confidence,
             iou=self.iou,
-            imgsz=self.img_size,
+            imgsz=imgsz,
             device=self.device,
             tracker=self.tracker_type,
             persist=True,  # maintain track IDs across frames
@@ -231,8 +235,11 @@ class ObjectTracker:
                 self._position_history[key] = pos_hist[-60:]
                 pos_hist = self._position_history[key]
 
-            # Check if detection has moved significantly across its lifetime
-            if total_seen >= self._STATIC_TOTAL_FRAMES and len(pos_hist) >= 2:
+            # Static detection suppression: reject detections that never move
+            # across their lifetime (trees, poles). Disabled by default —
+            # real surveillance targets (standing people, queued vehicles)
+            # are legitimately stationary and must remain visible.
+            if settings.STATIC_SUPPRESSION_ENABLED and total_seen >= self._STATIC_TOTAL_FRAMES and len(pos_hist) >= 2:
                 # Compare current position to earliest position in history
                 earliest_frame, earliest_x, earliest_y = pos_hist[0]
                 total_movement = abs(cx - earliest_x) + abs(cy - earliest_y)
