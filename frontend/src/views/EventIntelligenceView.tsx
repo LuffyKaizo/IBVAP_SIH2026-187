@@ -1,5 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { BorderAlert, SuspiciousEventItem } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+
+const AI_SERVICE_URL = (import.meta.env.VITE_AI_SERVICE_URL || 'http://localhost:8000');
+
+/** AI alerts are id'd "ALT-AI-<eventId>"; the evidence API is keyed by the raw eventId. */
+const eventIdFromAlertId = (id: string): string | null =>
+  id.startsWith('ALT-AI-') ? id.slice('ALT-AI-'.length) : null;
 
 interface EventIntelligenceViewProps {
   alerts: BorderAlert[];
@@ -21,13 +28,152 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
   const [filterSeverity, setFilterSeverity] = useState<'ALL' | 'CRITICAL' | 'HIGH' | 'MEDIUM'>('ALL');
   const [activeTab, setActiveTab] = useState<'INCIDENTS' | 'RULES' | 'NIGHT_CURFEW'>('INCIDENTS');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [sirenActive, setSirenActive] = useState(false);
+  const [evidence, setEvidence] = useState<{ state: 'LOADING' | 'READY' | 'UNAVAILABLE'; url: string | null }>(
+    { state: 'LOADING', url: null },
+  );
+
+  const { getAuthHeaders } = useAuth();
+  const sirenAudioRef = useRef<HTMLAudioElement | null>(null);
+  const chimeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const sirenTimerRef = useRef<number | null>(null);
 
   const filteredAlerts = alerts.filter((a) => filterSeverity === 'ALL' || a.severity === filterSeverity);
   const activeAlert = alerts.find((a) => a.id === selectedAlertId) || filteredAlerts[0] || alerts[0];
+  const activeAlertId = activeAlert?.id;
+  const activeSnapshotUrl = activeAlert?.snapshotUrl;
+
+  // Resolve the evidence snapshot for the selected incident through the existing
+  // GET /evidence (event_id filter) + GET /evidence/{id}/file APIs.
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    setEvidence({ state: 'LOADING', url: null });
+
+    const load = async () => {
+      try {
+        if (!activeAlertId) {
+          setEvidence({ state: 'UNAVAILABLE', url: null });
+          return;
+        }
+        if (activeSnapshotUrl) {
+          // Alerts that already carry a snapshot URL (system/mock sources) use it directly.
+          setEvidence({ state: 'READY', url: activeSnapshotUrl });
+          return;
+        }
+        const eventId = eventIdFromAlertId(activeAlertId);
+        if (!eventId) {
+          setEvidence({ state: 'UNAVAILABLE', url: null });
+          return;
+        }
+        const headers = getAuthHeaders();
+        const listRes = await fetch(
+          `${AI_SERVICE_URL}/evidence?event_id=${encodeURIComponent(eventId)}&limit=5`,
+          { headers },
+        );
+        if (!listRes.ok) throw new Error(`evidence list ${listRes.status}`);
+        const list = await listRes.json();
+        const evidenceId: string | undefined = list?.evidence?.[0]?.id;
+        if (!evidenceId) {
+          if (!cancelled) setEvidence({ state: 'UNAVAILABLE', url: null });
+          return;
+        }
+        const fileRes = await fetch(
+          `${AI_SERVICE_URL}/evidence/${encodeURIComponent(evidenceId)}/file`,
+          { headers },
+        );
+        if (!fileRes.ok) throw new Error(`evidence file ${fileRes.status}`);
+        const blob = await fileRes.blob();
+        createdUrl = URL.createObjectURL(blob);
+        if (!cancelled) setEvidence({ state: 'READY', url: createdUrl });
+      } catch {
+        if (!cancelled) setEvidence({ state: 'UNAVAILABLE', url: null });
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [activeAlertId, activeSnapshotUrl, getAuthHeaders]);
+
+  const stopSiren = () => {
+    const audio = sirenAudioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    if (sirenTimerRef.current !== null) {
+      window.clearTimeout(sirenTimerRef.current);
+      sirenTimerRef.current = null;
+    }
+    setSirenActive(false);
+  };
+
+  // Stop the siren whenever the operator switches to a different incident.
+  useEffect(() => {
+    stopSiren();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAlertId]);
+
+  // Release all audio resources on unmount.
+  useEffect(() => {
+    return () => {
+      for (const ref of [sirenAudioRef, chimeAudioRef]) {
+        const audio = ref.current;
+        if (audio) {
+          audio.pause();
+          audio.currentTime = 0;
+          ref.current = null;
+        }
+      }
+      if (sirenTimerRef.current !== null) {
+        window.clearTimeout(sirenTimerRef.current);
+        sirenTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const playDispatchChime = () => {
+    try {
+      let audio = chimeAudioRef.current;
+      if (!audio) {
+        audio = new Audio('/audio/dispatch-chime.wav');
+        audio.volume = 0.6;
+        chimeAudioRef.current = audio;
+      }
+      audio.currentTime = 0;
+      void audio.play().catch(() => { /* ignore playback rejection */ });
+    } catch { /* audio unsupported */ }
+  };
 
   const handleDispatchPatrol = () => {
     setActionNotice(`Patrol dispatched to ${activeAlert.cameraName}`);
     setTimeout(() => setActionNotice(null), 3500);
+    playDispatchChime();
+  };
+
+  const handleToggleSiren = () => {
+    try {
+      let audio = sirenAudioRef.current;
+      if (!audio) {
+        audio = new Audio('/audio/siren.wav');
+        audio.loop = true;
+        audio.volume = 0.7;
+        sirenAudioRef.current = audio;
+      }
+      if (sirenActive) {
+        stopSiren();
+        return;
+      }
+      void audio.play().then(() => {
+        setSirenActive(true);
+        // Controlled lifecycle: auto-stop after a short burst.
+        if (sirenTimerRef.current !== null) window.clearTimeout(sirenTimerRef.current);
+        sirenTimerRef.current = window.setTimeout(() => stopSiren(), 10000);
+      }).catch(() => setSirenActive(false));
+    } catch { /* audio unsupported */ }
   };
 
   return (
@@ -136,17 +282,107 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
                     </span>
                   </div>
 
-                  {/* Snapshot */}
-                  <div className="relative w-full aspect-video bg-surface-container-low rounded-lg overflow-hidden border border-outline-variant mb-4 select-none">
-                    <img src={activeAlert.snapshotUrl || ''} alt="Incident" className="w-full h-full object-cover opacity-90" />
-                    <div className="absolute left-[38%] top-[25%] w-[22%] h-[55%] border-2 border-error bg-error/10">
-                      <span className="absolute -top-[18px] left-0 text-[9px] font-mono font-bold text-on-error bg-error px-1.5 py-[2px] rounded">
-                        TARGET {activeAlert.trackId} ({activeAlert.confidence}%)
+                  {/* Incident Details */}
+                  <div className="bg-surface-container-low rounded-lg p-3.5 border border-outline-variant mb-4">
+                    <span className="text-[10px] font-bold text-primary uppercase tracking-wider block mb-2">Incident Details</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 text-[11px]">
+                      <div>
+                        <span className="block text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Severity</span>
+                        <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded mt-0.5 ${
+                          activeAlert.severity === 'CRITICAL' ? 'bg-error text-on-error' :
+                          activeAlert.severity === 'HIGH' ? 'bg-warning text-on-warning' :
+                          'bg-surface-container-high text-on-surface-variant'
+                        }`}>{activeAlert.severity}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Incident ID</span>
+                        <span className="font-mono font-semibold text-on-surface">{activeAlert.id}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Type</span>
+                        <span className="font-semibold text-on-surface">{activeAlert.eventType.replace(/_/g, ' ')}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Camera</span>
+                        <span className="font-semibold text-on-surface">{activeAlert.cameraId} · {activeAlert.cameraName}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Zone / Location</span>
+                        <span className="font-semibold text-on-surface">{activeAlert.zone}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Detected At</span>
+                        <span className="font-mono text-on-surface">{activeAlert.timestamp}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 mt-2.5 pt-2.5 border-t border-outline-variant/40 text-[10px] text-on-surface-variant">
+                      <span className="flex items-center gap-1">
+                        <span className="text-[9px] font-semibold uppercase tracking-wider">Track</span>
+                        <span className="font-mono font-bold text-on-surface">{activeAlert.trackId}</span>
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[13px]">my_location</span>
+                        Confidence <span className="font-mono font-bold text-on-surface">{activeAlert.confidence}%</span>
                       </span>
                     </div>
-                    <div className="absolute bottom-2 left-2 bg-on-surface/80 px-2 py-0.5 rounded text-[10px] text-surface font-mono">
-                      {activeAlert.cameraName} · {activeAlert.timestamp}
-                    </div>
+                  </div>
+
+                  {/* Response controls */}
+                  <div className="flex flex-wrap items-center gap-2 pb-4 mb-4 border-b border-outline-variant">
+                    <button onClick={handleDispatchPatrol} className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-on-primary rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer">
+                      <span className="material-symbols-outlined text-[14px]">local_police</span> Dispatch Patrol
+                    </button>
+                    <button
+                      onClick={handleToggleSiren}
+                      aria-pressed={sirenActive}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
+                        sirenActive
+                          ? 'bg-error text-on-error'
+                          : 'bg-surface hover:bg-surface-container-high border border-error text-error'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[14px]">{sirenActive ? 'volume_off' : 'volume_up'}</span>
+                      {sirenActive ? 'Stop Siren' : 'Sound Siren'}
+                    </button>
+                    {onActionAlert && activeAlert.status === 'ACTIVE' && (
+                      <button onClick={() => onActionAlert(activeAlert.id, 'ACKNOWLEDGE')} className="px-3 py-1.5 bg-surface hover:bg-surface-container-high border border-outline-variant text-[11px] text-on-surface font-semibold rounded-lg cursor-pointer flex items-center justify-center gap-1.5">
+                        <span className="material-symbols-outlined text-[14px]">check</span>
+                        Acknowledge
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Snapshot */}
+                  <div className="relative w-full aspect-video bg-surface-container-low rounded-lg overflow-hidden border border-outline-variant mb-4 select-none">
+                    {evidence.state === 'READY' && evidence.url ? (
+                      <>
+                        <img
+                          src={evidence.url}
+                          alt="Incident snapshot"
+                          className="w-full h-full object-cover opacity-90"
+                          onError={() => setEvidence({ state: 'UNAVAILABLE', url: null })}
+                        />
+                        <div className="absolute left-[38%] top-[25%] w-[22%] h-[55%] border-2 border-error bg-error/10">
+                          <span className="absolute -top-[18px] left-0 text-[9px] font-mono font-bold text-on-error bg-error px-1.5 py-[2px] rounded">
+                            TARGET {activeAlert.trackId} ({activeAlert.confidence}%)
+                          </span>
+                        </div>
+                        <div className="absolute bottom-2 left-2 bg-on-surface/80 px-2 py-0.5 rounded text-[10px] text-surface font-mono">
+                          {activeAlert.cameraName} · {activeAlert.timestamp}
+                        </div>
+                      </>
+                    ) : evidence.state === 'LOADING' ? (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[28px] animate-spin">progress_activity</span>
+                        <span className="text-[11px]">Loading evidence snapshot…</span>
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-on-surface-variant px-4 text-center">
+                        <span className="material-symbols-outlined text-[32px] opacity-60">image_not_supported</span>
+                        <span className="text-[11px] font-bold uppercase tracking-wider">No evidence snapshot captured</span>
+                        <span className="text-[10px] font-mono">{activeAlert.cameraName} · {activeAlert.timestamp}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Reason */}
@@ -227,22 +463,6 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
                       ))}
                     </div>
                   </div>
-                </div>
-
-                {/* Actions */}
-                <div className="pt-4 mt-4 border-t border-outline-variant flex flex-wrap items-center gap-2">
-                  <button onClick={handleDispatchPatrol} className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-on-primary rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer">
-                    <span className="material-symbols-outlined text-[14px]">local_police</span> Dispatch Patrol
-                  </button>
-                  <button className="px-3 py-1.5 bg-surface hover:bg-surface-container-high border border-error text-error rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer">
-                    <span className="material-symbols-outlined text-[14px]">volume_up</span> Sound Siren
-                  </button>
-                  {onActionAlert && activeAlert.status === 'ACTIVE' && (
-                    <button onClick={() => onActionAlert(activeAlert.id, 'ACKNOWLEDGE')} className="px-3 py-1.5 bg-surface hover:bg-surface-container-high border border-outline-variant text-[11px] text-on-surface font-semibold rounded-lg cursor-pointer flex items-center justify-center gap-1.5">
-                      <span className="material-symbols-outlined text-[14px]">check</span>
-                      Acknowledge
-                    </button>
-                  )}
                 </div>
               </div>
             )}
