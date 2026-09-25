@@ -4,7 +4,7 @@ import { CameraFeed, AiTrackingMetadata, AiTrackedObject, AiFaceDetection, Track
 import { useAuth } from '../contexts/AuthContext';
 import { AIBoundingBoxOverlay } from '../components/AIBoundingBoxOverlay';
 import { AIFaceOverlay } from '../components/AIFaceOverlay';
-import { useIntrusionZoneController, IntrusionZoneLayer, IntrusionZoneButton, ZoneManageMenu } from '../components/IntrusionZoneLayer';
+import { useIntrusionZoneController, IntrusionZoneLayer, IntrusionZoneButton, ZoneManageMenu, ZoneStatusPanel } from '../components/IntrusionZoneLayer';
 
 interface CamerasMonitoringViewProps {
   cameras: CameraFeed[];
@@ -164,6 +164,7 @@ const CameraTile: React.FC<CameraTileProps> = ({ camera, token, zones, onOpen, o
     zones,
     onSaveZone: onSaveZone || (() => {}),
     onDeleteZone: onDeleteZone || (() => {}),
+    events,
   });
 
   useEffect(() => {
@@ -271,6 +272,7 @@ const CameraTile: React.FC<CameraTileProps> = ({ camera, token, zones, onOpen, o
         </span>
       </div>
       {zoneCtl.menuPos && <ZoneManageMenu controller={zoneCtl} />}
+      {zoneCtl.statusPos && <ZoneStatusPanel controller={zoneCtl} />}
     </div>
   );
 };
@@ -319,6 +321,7 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
     zones,
     onSaveZone: onSaveZone || (() => {}),
     onDeleteZone: onDeleteZone || (() => {}),
+    events,
   });
 
   // Context-menu "Create Zone" deep-link: enter create mode once ready.
@@ -841,6 +844,7 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
         </div>, document.body
       )}
       {zoneCtl.menuPos && <ZoneManageMenu controller={zoneCtl} />}
+      {zoneCtl.statusPos && <ZoneStatusPanel controller={zoneCtl} />}
     </div>
   );
 };

@@ -154,6 +154,9 @@ class Settings:
     EVIDENCE_RETENTION_DAYS: int = int(os.getenv("EVIDENCE_RETENTION_DAYS", "90"))
     EVIDENCE_DIR: str = os.getenv("EVIDENCE_DIR", "")
     EVIDENCE_SNAPSHOT_QUALITY: int = int(os.getenv("EVIDENCE_SNAPSHOT_QUALITY", "85"))
+    # Fraction of the target bbox added on each side when cropping TARGET_CROP
+    # evidence (spec: target-centric crop, clamped 0.0-0.5)
+    EVIDENCE_TARGET_CROP_MARGIN: float = float(os.getenv("EVIDENCE_TARGET_CROP_MARGIN", "0.2"))
 
     # Store-and-Forward Synchronization
     SYNC_ENABLED: bool = os.getenv("SYNC_ENABLED", "true").lower() == "true"

@@ -22,7 +22,6 @@ from pydantic import BaseModel
 
 from ai.config import settings
 from ai.detection.yolo_detector import YoloDetector
-from ai.events.engine import Zone
 from ai.camera.config import CameraConfig
 from ai.camera.manager import CameraManager
 from ai.db.session import init_db, close_db, get_db_session, is_available
@@ -66,24 +65,49 @@ _audit_repo = None
 _user_repo = None
 
 
+# Legacy auto-created default zone (pre-fix): covered ~80% of the frame, which
+# made every ground point "inside" — all objects rendered red. Zones are now
+# operator-created on demand (spec: create when needed, empty list otherwise).
+_LEGACY_DEFAULT_ZONE_NAME = "Restricted Border Area"
+_LEGACY_DEFAULT_ZONE_POINTS = [
+    {"x": 0.10, "y": 0.20},
+    {"x": 0.90, "y": 0.20},
+    {"x": 0.90, "y": 0.90},
+    {"x": 0.10, "y": 0.90},
+]
+# Replacement geometry: a bottom border strip (visible, editable, disable-able)
+_LEGACY_DEFAULT_ZONE_STRIP = [
+    {"x": 0.10, "y": 0.80},
+    {"x": 0.90, "y": 0.80},
+    {"x": 0.90, "y": 0.95},
+    {"x": 0.10, "y": 0.95},
+]
+
+
 def _build_default_zones(camera_id: str):
-    """Create a default development zone for a camera."""
-    return [
-        Zone(
-            id="ZONE-01",
-            camera_id=camera_id,
-            name="Restricted Border Area",
-            points=[
-                {"x": 0.10, "y": 0.20},
-                {"x": 0.90, "y": 0.20},
-                {"x": 0.90, "y": 0.90},
-                {"x": 0.10, "y": 0.90},
-            ],
-            enabled=True,
-            severity="CRITICAL",
-            zone_type="POLYGON_ZONE",
-        )
-    ]
+    """No implicit zones for a camera — operators define zones on demand."""
+    return []
+
+
+def _is_legacy_default_zone(zone) -> bool:
+    """True for the untouched auto-created full-frame default rectangle."""
+    pts = getattr(zone, "points", None) or (
+        zone.get("points") if isinstance(zone, dict) else None
+    )
+    name = getattr(zone, "name", None) or (
+        zone.get("name") if isinstance(zone, dict) else ""
+    )
+    if name != _LEGACY_DEFAULT_ZONE_NAME or not pts or len(pts) != 4:
+        return False
+    try:
+        for p, expected in zip(pts, _LEGACY_DEFAULT_ZONE_POINTS):
+            px = p.get("x") if isinstance(p, dict) else float(p["x"])
+            py = p.get("y") if isinstance(p, dict) else float(p["y"])
+            if abs(float(px) - expected["x"]) > 1e-6 or abs(float(py) - expected["y"]) > 1e-6:
+                return False
+        return True
+    except Exception:
+        return False
 
 
 def _build_seed_camera() -> CameraConfig:
@@ -260,15 +284,22 @@ async def lifespan(app):
                 cam_zones = []
                 if _zone_repo:
                     cam_zones = await _zone_repo.list_for_camera(cam_config.camera_id)
+                # Root-cause fix: the legacy auto-created default zone covered
+                # ~80% of the frame, so every ground point evaluated "inside"
+                # (all objects rendered red). Shrink any untouched default zone
+                # to a bottom border strip; operator zones are left untouched.
+                for z in cam_zones:
+                    if _is_legacy_default_zone(z):
+                        try:
+                            if _zone_repo:
+                                await _zone_repo.update(z.id, points=list(_LEGACY_DEFAULT_ZONE_STRIP))
+                            z.points = [dict(p) for p in _LEGACY_DEFAULT_ZONE_STRIP]
+                            print("[STARTUP] Normalized legacy default zone %s (%s)"
+                                  % (z.id, cam_config.camera_id))
+                        except Exception as exc:
+                            print("[STARTUP] Zone normalize failed for %s: %s" % (z.id, exc))
                 if not cam_zones:
                     cam_zones = _build_default_zones(cam_config.camera_id)
-                    # Persist default zone
-                    if _zone_repo:
-                        for z in cam_zones:
-                            try:
-                                await _zone_repo.create(z)
-                            except Exception:
-                                pass
                 await camera_manager.register_camera(
                     cam_config, auto_start=cam_config.enabled, zones=cam_zones
                 )
@@ -461,13 +492,6 @@ async def register_camera(
             zones=_build_default_zones(req.camera_id),
             actor=user.user_id,
         )
-        # Persist default zone to database
-        if _zone_repo and is_available():
-            for zone in _build_default_zones(req.camera_id):
-                try:
-                    await _zone_repo.create(zone)
-                except Exception:
-                    pass
         return {"success": True, "camera": info}
     except ValueError as e:
         return {"error": str(e)}
@@ -791,24 +815,8 @@ async def get_zones(
             zones = await _zone_repo.list_all()
         return {"zones": [z.__dict__ if hasattr(z, '__dict__') else z for z in zones]}
 
-    # Fallback: return default zone for camera
-    zones = []
-    if camera_id:
-        zones = [{
-            "id": "ZONE-01",
-            "camera_id": camera_id,
-            "name": "Restricted Border Area",
-            "points": [
-                {"x": 0.10, "y": 0.20},
-                {"x": 0.90, "y": 0.20},
-                {"x": 0.90, "y": 0.90},
-                {"x": 0.10, "y": 0.90},
-            ],
-            "enabled": True,
-            "severity": "CRITICAL",
-            "zone_type": "POLYGON_ZONE",
-        }]
-    return {"zones": zones}
+    # Fallback (no database): cameras have no zones until an operator creates one
+    return {"zones": []}
 
 
 @app.post("/zones")

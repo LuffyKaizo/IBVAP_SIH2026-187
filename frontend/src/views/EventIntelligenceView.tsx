@@ -8,6 +8,62 @@ const AI_SERVICE_URL = (import.meta.env.VITE_AI_SERVICE_URL || 'http://localhost
 const eventIdFromAlertId = (id: string): string | null =>
   id.startsWith('ALT-AI-') ? id.slice('ALT-AI-'.length) : null;
 
+/** Blob URL cache for alert-card thumbnails (eventId -> object URL). */
+const thumbCache = new Map<string, string>();
+
+/** Small target-crop thumbnail for an alert card. Fetches the event's
+ * evidence, preferring the annotated TARGET_CROP, and caches the blob URL.
+ * Skips non-AI alerts and renders nothing when no evidence exists. */
+const AlertEvidenceThumb: React.FC<{ alert: BorderAlert; index: number }> = ({ alert, index }) => {
+  const [url, setUrl] = useState<string | null>(() => thumbCache.get(alert.id) || null);
+  const { getAuthHeaders } = useAuth();
+
+  useEffect(() => {
+    if (url || index >= 40) return;
+    const eventId = eventIdFromAlertId(alert.id);
+    if (!eventId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const headers = getAuthHeaders();
+        const listRes = await fetch(
+          `${AI_SERVICE_URL}/evidence?event_id=${encodeURIComponent(eventId)}&limit=5`,
+          { headers },
+        );
+        if (!listRes.ok) return;
+        const list = await listRes.json();
+        const items: { id?: string; evidenceType?: string }[] = list?.evidence || [];
+        const chosen = items.find((e) => e.evidenceType === 'TARGET_CROP') || items[0];
+        if (!chosen?.id) return;
+        const fileRes = await fetch(
+          `${AI_SERVICE_URL}/evidence/${encodeURIComponent(chosen.id)}/file`,
+          { headers },
+        );
+        if (!fileRes.ok) return;
+        const blob = await fileRes.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        thumbCache.set(alert.id, objectUrl);
+        if (!cancelled) setUrl(objectUrl);
+      } catch {
+        /* thumbnail is best-effort */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [alert.id, index, url, getAuthHeaders]);
+
+  if (!url) return null;
+  return (
+    <img
+      src={url}
+      alt=""
+      data-testid="alert-evidence-thumb"
+      className="w-11 h-7 object-cover rounded border border-outline-variant shrink-0"
+    />
+  );
+};
+
 interface EventIntelligenceViewProps {
   alerts: BorderAlert[];
   suspiciousEvents: SuspiciousEventItem[];
@@ -29,9 +85,11 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
   const [activeTab, setActiveTab] = useState<'INCIDENTS' | 'RULES' | 'NIGHT_CURFEW'>('INCIDENTS');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [sirenActive, setSirenActive] = useState(false);
-  const [evidence, setEvidence] = useState<{ state: 'LOADING' | 'READY' | 'UNAVAILABLE'; url: string | null }>(
-    { state: 'LOADING', url: null },
-  );
+  const [evidence, setEvidence] = useState<{
+    state: 'LOADING' | 'READY' | 'UNAVAILABLE';
+    url: string | null;
+    kind: 'TARGET_CROP' | 'SNAPSHOT' | null;
+  }>({ state: 'LOADING', url: null, kind: null });
 
   const { getAuthHeaders } = useAuth();
   const sirenAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -48,22 +106,22 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
   useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
-    setEvidence({ state: 'LOADING', url: null });
+    setEvidence({ state: 'LOADING', url: null, kind: null });
 
     const load = async () => {
       try {
         if (!activeAlertId) {
-          setEvidence({ state: 'UNAVAILABLE', url: null });
+          setEvidence({ state: 'UNAVAILABLE', url: null, kind: null });
           return;
         }
         if (activeSnapshotUrl) {
           // Alerts that already carry a snapshot URL (system/mock sources) use it directly.
-          setEvidence({ state: 'READY', url: activeSnapshotUrl });
+          setEvidence({ state: 'READY', url: activeSnapshotUrl, kind: null });
           return;
         }
         const eventId = eventIdFromAlertId(activeAlertId);
         if (!eventId) {
-          setEvidence({ state: 'UNAVAILABLE', url: null });
+          setEvidence({ state: 'UNAVAILABLE', url: null, kind: null });
           return;
         }
         const headers = getAuthHeaders();
@@ -73,9 +131,13 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
         );
         if (!listRes.ok) throw new Error(`evidence list ${listRes.status}`);
         const list = await listRes.json();
-        const evidenceId: string | undefined = list?.evidence?.[0]?.id;
+        // Primary evidence is the annotated TARGET_CROP (red box + labels are
+        // baked into the pixels); fall back to the full-scene snapshot.
+        const items: { id?: string; evidenceType?: string }[] = list?.evidence || [];
+        const chosen = items.find((e) => e.evidenceType === 'TARGET_CROP') || items[0];
+        const evidenceId: string | undefined = chosen?.id;
         if (!evidenceId) {
-          if (!cancelled) setEvidence({ state: 'UNAVAILABLE', url: null });
+          if (!cancelled) setEvidence({ state: 'UNAVAILABLE', url: null, kind: null });
           return;
         }
         const fileRes = await fetch(
@@ -85,9 +147,15 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
         if (!fileRes.ok) throw new Error(`evidence file ${fileRes.status}`);
         const blob = await fileRes.blob();
         createdUrl = URL.createObjectURL(blob);
-        if (!cancelled) setEvidence({ state: 'READY', url: createdUrl });
+        if (!cancelled) {
+          setEvidence({
+            state: 'READY',
+            url: createdUrl,
+            kind: chosen?.evidenceType === 'TARGET_CROP' ? 'TARGET_CROP' : 'SNAPSHOT',
+          });
+        }
       } catch {
-        if (!cancelled) setEvidence({ state: 'UNAVAILABLE', url: null });
+        if (!cancelled) setEvidence({ state: 'UNAVAILABLE', url: null, kind: null });
       }
     };
 
@@ -238,7 +306,7 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
             {/* Alert List */}
             <div className="lg:col-span-5 flex flex-col gap-2.5">
-              {filteredAlerts.map((alert) => {
+              {filteredAlerts.map((alert, idx) => {
                 const isSelected = alert.id === activeAlert.id;
                 const isCrit = alert.severity === 'CRITICAL';
                 const isHigh = alert.severity === 'HIGH';
@@ -262,9 +330,17 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
                       <span className="font-mono text-[10px] text-on-surface-variant">{alert.timestamp}</span>
                     </div>
                     <div className="text-[13px] font-semibold text-on-surface">{alert.title}</div>
-                    <div className="text-[11px] text-on-surface-variant flex items-center justify-between">
-                      <span>{alert.cameraId} · {alert.cameraName}</span>
-                      <span className="font-mono text-primary font-semibold">{alert.trackId}</span>
+                    {alert.message && (
+                      <div className="text-[11px] text-on-surface-variant leading-snug" data-testid="alert-message">
+                        {alert.message}
+                      </div>
+                    )}
+                    <div className="text-[11px] text-on-surface-variant flex items-center justify-between gap-2">
+                      <span className="truncate">{alert.cameraId} · {alert.cameraName}</span>
+                      <span className="flex items-center gap-2 shrink-0">
+                        <span className="font-mono text-primary font-semibold">{alert.trackId}</span>
+                        <AlertEvidenceThumb alert={alert} index={idx} />
+                      </span>
                     </div>
                   </button>
                 );
@@ -327,6 +403,17 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
                     </div>
                   </div>
 
+                  {/* Incident message (exact operator-facing alert sentence) */}
+                  {activeAlert.message && (
+                    <div
+                      className="bg-error-container/40 border border-error/30 rounded-lg px-3 py-2 mb-4 text-[12px] font-semibold text-on-surface flex items-start gap-2"
+                      data-testid="dossier-message"
+                    >
+                      <span className="material-symbols-outlined text-error text-[15px] mt-0.5">warning</span>
+                      <span>{activeAlert.message}</span>
+                    </div>
+                  )}
+
                   {/* Response controls */}
                   <div className="flex flex-wrap items-center gap-2 pb-4 mb-4 border-b border-outline-variant">
                     <button onClick={handleDispatchPatrol} className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-on-primary rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer">
@@ -358,17 +445,21 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
                       <>
                         <img
                           src={evidence.url}
-                          alt="Incident snapshot"
+                          alt={evidence.kind === 'TARGET_CROP' ? 'Target crop evidence' : 'Incident snapshot'}
                           className="w-full h-full object-cover opacity-90"
-                          onError={() => setEvidence({ state: 'UNAVAILABLE', url: null })}
+                          onError={() => setEvidence({ state: 'UNAVAILABLE', url: null, kind: null })}
                         />
-                        <div className="absolute left-[38%] top-[25%] w-[22%] h-[55%] border-2 border-error bg-error/10">
-                          <span className="absolute -top-[18px] left-0 text-[9px] font-mono font-bold text-on-error bg-error px-1.5 py-[2px] rounded">
-                            TARGET {activeAlert.trackId} ({activeAlert.confidence}%)
+                        {/* No fake CSS bounding box — the red box + labels are
+                            baked into TARGET_CROP images by the AI pipeline. */}
+                        <div className="absolute bottom-2 left-2 flex items-center gap-1.5">
+                          {evidence.kind === 'TARGET_CROP' && (
+                            <span className="bg-error px-2 py-0.5 rounded text-[9px] font-mono font-bold text-on-error" data-testid="evidence-target-crop-badge">
+                              TARGET CROP
+                            </span>
+                          )}
+                          <span className="bg-on-surface/80 px-2 py-0.5 rounded text-[10px] text-surface font-mono">
+                            {activeAlert.cameraName} · {activeAlert.timestamp}
                           </span>
-                        </div>
-                        <div className="absolute bottom-2 left-2 bg-on-surface/80 px-2 py-0.5 rounded text-[10px] text-surface font-mono">
-                          {activeAlert.cameraName} · {activeAlert.timestamp}
                         </div>
                       </>
                     ) : evidence.state === 'LOADING' ? (

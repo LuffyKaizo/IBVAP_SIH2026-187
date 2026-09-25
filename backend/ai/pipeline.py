@@ -58,6 +58,9 @@ class PipelineState:
         # Alert dedup + escalation: key -> (alert_dict, first_seen_timestamp)
         self._active_alerts: dict = {}
         self._alert_first_seen: dict = {}
+        # Event-id keyed alerts: event_id -> alert_dict (one alert + one evidence
+        # capture per intrusion episode; a re-entry has a new event_id)
+        self._alert_by_event: dict = {}
         # Severity order for escalation comparison
         self._SEVERITY_ORDER = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 
@@ -197,15 +200,31 @@ class PipelineState:
         # Map severity
         severity = event.get("severity", "MEDIUM")
 
-        # Generate title
+        # Generate title (spec: intrusion zone alerts use one clear title)
         titles = {
-            "PERSON_INTRUSION": "Border Perimeter Intrusion Breach",
-            "VEHICLE_INTRUSION": "Unidentified Vehicle in Restricted Zone",
+            "PERSON_INTRUSION": "Intrusion Zone Breach",
+            "VEHICLE_INTRUSION": "Intrusion Zone Breach",
             "LOITERING": "Perimeter Loitering Detected",
             "NIGHT_MOVEMENT": "Unauthorized Night-Time Movement",
             "SUSPICIOUS_ACTIVITY": "Suspicious Activity Detected",
         }
         title = titles.get(etype, "Security Event")
+
+        # Operator-facing incident message (spec: exact alert text, e.g.
+        # "Person #2 entered Intrusion Zone 'Gate 3 Restricted Area' on CAM-05.")
+        message = ""
+        if etype in ("PERSON_INTRUSION", "VEHICLE_INTRUSION"):
+            default_cls = "person" if etype == "PERSON_INTRUSION" else "vehicle"
+            cls = str(event.get("object_class") or default_cls)
+            label = cls[:1].upper() + cls[1:]
+            if track_id >= 0:
+                subject = "%s #%s" % (label, track_id)
+            else:
+                subject = label
+            zone_label = zone_name or "Default Zone"
+            message = "%s entered Intrusion Zone '%s' on %s." % (
+                subject, zone_label, event.get("camera_id", "")
+            )
 
         # Generate reason
         if etype == "SUSPICIOUS_ACTIVITY" and reasons:
@@ -238,6 +257,7 @@ class PipelineState:
             "cameraName": resolved_name,
             "eventType": alert_event_type,
             "title": title,
+            "message": message,
             "severity": severity,
             "trackId": f"#{track_id}" if track_id >= 0 else "#?",
             "confidence": round(event.get("confidence", 0) * 100),
@@ -260,8 +280,10 @@ class PipelineState:
     def set_events(self, events):
         """Attach security events and AI-generated alerts to the latest metadata.
         Persists only on status transitions (DETECTED→ACTIVE→RESOLVED).
-        Captures evidence snapshot on DETECTED transition.
-        Deduplicates and escalates alerts for the same logical incident.
+        Captures evidence on the DETECTED transition (full-frame SNAPSHOT plus
+        an annotated TARGET_CROP for intrusion events).
+        Deduplicates alerts per event_id (one alert + evidence per intrusion
+        episode; re-entry creates a fresh alert). Escalates on severity rise.
         Uses thread-safe scheduling for database operations.
         """
         with self.lock:
@@ -383,20 +405,39 @@ class PipelineState:
     def _should_create_or_escalate(self, event_dict, alert_dict):
         """Determine whether to create a new alert or escalate existing.
 
+        Zone-intrusion style events carry a stable event_id per episode:
+        DETECTED -> ACTIVE -> RESOLVED frames of the same episode map to the
+        same id (UPDATE/ESCALATE), while a re-entry after leaving the zone gets
+        a brand-new id (CREATE -> new alert + new evidence capture). This also
+        isolates entries of different zones/tracks from each other.
+
+        Events without an event_id fall back to the legacy camera:track:type
+        time-window dedup.
+
         Returns (action, existing_alert) where action is 'CREATE', 'ESCALATE', or 'UPDATE'.
         """
         import time as _time
         now = _time.time()
-        dedup_key = self._make_dedup_key(event_dict)
 
+        event_id = event_dict.get("event_id")
+        if event_id:
+            existing = self._alert_by_event.get(event_id)
+            if existing is None:
+                return "CREATE", None
+            new_order = self._SEVERITY_ORDER.get(alert_dict.get("severity", "MEDIUM"), 1)
+            old_order = self._SEVERITY_ORDER.get(existing.get("severity", "MEDIUM"), 1)
+            if new_order > old_order:
+                return "ESCALATE", existing
+            return "UPDATE", existing
+
+        # Legacy fallback for id-less events (active-window dedup)
+        dedup_key = self._make_dedup_key(event_dict)
         if dedup_key in self._active_alerts:
             existing, first_seen = self._active_alerts[dedup_key], self._alert_first_seen[dedup_key]
             # Check if within active window
             if now - first_seen <= settings.ALERT_ACTIVE_WINDOW_SEC:
-                new_severity = alert_dict.get("severity", "MEDIUM")
-                old_severity = existing.get("severity", "MEDIUM")
-                new_order = self._SEVERITY_ORDER.get(new_severity, 1)
-                old_order = self._SEVERITY_ORDER.get(old_severity, 1)
+                new_order = self._SEVERITY_ORDER.get(alert_dict.get("severity", "MEDIUM"), 1)
+                old_order = self._SEVERITY_ORDER.get(existing.get("severity", "MEDIUM"), 1)
                 if new_order > old_order:
                     return "ESCALATE", existing
                 return "UPDATE", existing
@@ -406,7 +447,21 @@ class PipelineState:
         return "CREATE", None
 
     def _record_alert(self, event_dict, alert_dict):
-        """Record alert in dedup tracking."""
+        """Record alert in dedup tracking.
+
+        For events with an event_id the alert is keyed by that id and the
+        legacy time window is intentionally NOT refreshed (resetting first_seen
+        on every frame would keep the window alive forever and suppress the
+        next entry's alert + evidence).
+        """
+        event_id = event_dict.get("event_id")
+        if event_id:
+            self._alert_by_event[event_id] = alert_dict
+            # Bound memory: evict oldest entries (dicts preserve insertion order)
+            if len(self._alert_by_event) > 2000:
+                for old_id in list(self._alert_by_event.keys())[:500]:
+                    del self._alert_by_event[old_id]
+            return
         dedup_key = self._make_dedup_key(event_dict)
         self._active_alerts[dedup_key] = alert_dict
         self._alert_first_seen[dedup_key] = __import__("time").time()
@@ -493,15 +548,100 @@ class PipelineState:
                 await self._anpr_repo.create(result)
         self._schedule_persist(_persist())
 
-    async def _capture_and_enqueue_sync(self, event_dict, frame):
-        """Capture evidence and enqueue for sync (non-blocking)."""
+    @staticmethod
+    def _build_target_crop(frame, event_dict):
+        """Crop the target bbox from the frame with drawn intrusion annotations.
+
+        Returns an annotated BGR numpy crop, or None when the frame/bbox are
+        not usable. The red box + INTRUSION label + class/track/confidence/zone
+        are baked into the pixels so evidence images show the actual target
+        (spec: target-centric capture with annotations on the image itself).
+        """
         try:
-            result = await self._evidence_capture.capture_snapshot(
-                event_dict, frame, actor="SYSTEM"
+            if frame is None or not isinstance(frame, np.ndarray):
+                return None
+            bbox = event_dict.get("bbox") or {}
+            x1, y1 = float(bbox.get("x1", -1)), float(bbox.get("y1", -1))
+            x2, y2 = float(bbox.get("x2", -1)), float(bbox.get("y2", -1))
+            if x2 <= x1 or y2 <= y1:
+                return None
+            h, w = frame.shape[:2]
+            # Expand by configurable margin, then clamp to the frame
+            margin = max(0.0, min(float(settings.EVIDENCE_TARGET_CROP_MARGIN), 0.5))
+            dx, dy = (x2 - x1) * margin, (y2 - y1) * margin
+            x1, y1, x2, y2 = x1 - dx, y1 - dy, x2 + dx, y2 + dy
+            x1, y1 = max(0, int(x1)), max(0, int(y1))
+            x2, y2 = min(w, int(x2)), min(h, int(y2))
+            if x2 - x1 < 8 or y2 - y1 < 8:
+                return None
+            crop = frame[y1:y2, x1:x2].copy()
+            ch, cw = crop.shape[:2]
+
+            # Red target box in crop coordinates
+            cv2.rectangle(crop, (1, 1), (cw - 2, ch - 2), (0, 0, 255), 2)
+
+            # Label banner: INTRUSION / CLASS #track conf% / zone name
+            conf = float(event_dict.get("confidence", 0) or 0)
+            track_id = int(event_dict.get("track_id", -1))
+            cls = str(event_dict.get("object_class") or "target")
+            cls = cls[:1].upper() + cls[1:]
+            if track_id >= 0:
+                target = "%s #%d  %d%%" % (cls, track_id, round(conf * 100))
+            else:
+                target = "%s  %d%%" % (cls, round(conf * 100))
+            lines = ["INTRUSION", target]
+            zone = event_dict.get("zone_name") or ""
+            if zone:
+                lines.append(zone)
+
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            scale = max(0.45, min(0.8, cw / 400.0))
+            thickness = max(1, int(round(scale * 2)))
+            sizes = [cv2.getTextSize(t, font, scale, thickness)[0] for t in lines]
+            banner_w = min(cw, max(s[0] for s in sizes) + 14)
+            banner_h = min(ch, sum(s[1] for s in sizes) + 10 * len(lines) + 4)
+            overlay = crop.copy()
+            cv2.rectangle(overlay, (1, 1), (banner_w, banner_h), (0, 0, 255), -1)
+            cv2.addWeighted(overlay, 0.75, crop, 0.25, 0, crop)
+            y_cursor = 4
+            for text, (tw, th) in zip(lines, sizes):
+                if y_cursor + th + 4 > banner_h:
+                    break
+                cv2.putText(crop, text, (7, y_cursor + th), font, scale,
+                            (255, 255, 255), thickness, cv2.LINE_AA)
+                y_cursor += th + 10
+            return crop
+        except Exception:
+            return None
+
+    async def _capture_and_enqueue_sync(self, event_dict, frame):
+        """Capture evidence and enqueue for sync (non-blocking).
+
+        Zone-intrusion events capture TWO artifacts from the exact event frame:
+          1. SNAPSHOT    — full scene (context; captured first)
+          2. TARGET_CROP — bbox crop with red box + labels baked in (primary)
+        """
+        try:
+            results = []
+            full = await self._evidence_capture.capture_snapshot(
+                event_dict, frame, actor="SYSTEM", evidence_type="SNAPSHOT"
             )
-            if result and self._sync_manager:
-                await self._sync_manager.enqueue_evidence(result.get("id", ""), result)
-            return result
+            if full:
+                results.append(full)
+            if event_dict.get("event_type") in ("PERSON_INTRUSION", "VEHICLE_INTRUSION"):
+                crop = self._build_target_crop(frame, event_dict)
+                if crop is not None:
+                    cropped = await self._evidence_capture.capture_snapshot(
+                        event_dict, crop, actor="SYSTEM",
+                        evidence_type="TARGET_CROP",
+                        metadata_extra={"is_target_crop": True},
+                    )
+                    if cropped:
+                        results.append(cropped)
+            if self._sync_manager:
+                for r in results:
+                    await self._sync_manager.enqueue_evidence(r.get("id", ""), r)
+            return results[-1] if results else None
         except Exception:
             return None
 
@@ -539,6 +679,7 @@ class PipelineState:
             self._context_contexts.clear()
             self._active_alerts.clear()
             self._alert_first_seen.clear()
+            self._alert_by_event.clear()
 
     def get_latest_frame(self):
         with self.lock:

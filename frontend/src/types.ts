@@ -51,6 +51,9 @@ export interface BorderAlert {
   cameraName: string;
   eventType: 'BORDER_INTRUSION' | 'NIGHT_MOVEMENT' | 'RESTRICTED_ZONE_VEHICLE' | 'LOITERING' | 'REPEATED_CROSSING' | 'STOPPED_VEHICLE' | 'SUSPICIOUS_ACTIVITY';
   title: string;
+  /** Exact operator-facing incident sentence (AI alerts), e.g.
+   * "Person #2 entered Intrusion Zone 'Gate 3 Restricted Area' on CAM-05." */
+  message?: string;
   severity: AlertSeverity;
   trackId: string;
   confidence: number;
@@ -289,6 +292,8 @@ export interface AiAlert {
   cameraName: string;
   eventType: string;
   title: string;
+  /** Exact operator-facing incident sentence (absent on non-intrusion events). */
+  message?: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO';
   trackId: string;
   confidence: number;

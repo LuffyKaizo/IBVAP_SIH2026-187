@@ -24,6 +24,26 @@ _operator_user_id = None
 _viewer_user_id = None
 
 
+@pytest.fixture(autouse=True)
+def _ensure_current_event_loop():
+    """Python 3.14: asyncio.get_event_loop() raises when no loop is set.
+
+    Some suites (test_evidence, test_sync) call
+    asyncio.get_event_loop().run_until_complete(...) directly, while other
+    tests use asyncio.run()/loop.close() which clear the current loop — so
+    whether these tests pass depended on test execution order. Ensure every
+    test starts with a usable current loop.
+    """
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("closed")
+    except Exception:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    yield
+
+
 def _create_user(email, password, role="VIEWER"):
     user_id = secrets.token_hex(16)
     password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")

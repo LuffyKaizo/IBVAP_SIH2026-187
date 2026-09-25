@@ -63,14 +63,19 @@ class EvidenceCapture:
         frame: np.ndarray,
         actor: str = "SYSTEM",
         jpeg_quality: int = None,
+        evidence_type: str = "SNAPSHOT",
+        metadata_extra: Optional[dict] = None,
     ) -> Optional[dict]:
-        """Capture a JPEG snapshot for an event and persist metadata.
+        """Capture a JPEG image for an event and persist metadata.
 
         Args:
             event_dict: Event dict with event_id, camera_id, event_type, etc.
-            frame: Raw BGR numpy frame from the video pipeline.
+            frame: Raw BGR numpy frame (or a pre-cropped target image).
             actor: Identity of who triggered this (user_id or "SYSTEM").
             jpeg_quality: Override JPEG quality (default: self._snapshot_quality).
+            evidence_type: "SNAPSHOT" (full scene) or "TARGET_CROP"
+                (target-centric crop with annotations baked in).
+            metadata_extra: Optional extra keys merged into evidence metadata.
 
         Returns:
             Evidence metadata dict on success, None on failure.
@@ -106,27 +111,30 @@ class EvidenceCapture:
             file_size = len(jpeg_bytes)
 
             # Build evidence metadata
+            metadata = {
+                "event_type": event_dict.get("event_type"),
+                "severity": event_dict.get("severity"),
+                "track_id": event_dict.get("track_id"),
+                "object_class": event_dict.get("object_class"),
+                "confidence": event_dict.get("confidence"),
+                "bbox": event_dict.get("bbox"),
+                "zone_name": event_dict.get("zone_name"),
+            }
+            if metadata_extra:
+                metadata.update({k: v for k, v in metadata_extra.items() if v is not None})
             evidence = {
                 "id": evidence_id,
                 "eventId": event_id,
                 "alertId": event_dict.get("alert_id"),
                 "cameraId": camera_id,
-                "evidenceType": "SNAPSHOT",
+                "evidenceType": evidence_type,
                 "timestamp": event_dict.get("timestamp", time.time()),
                 "filePath": file_path,
                 "fileSize": file_size,
                 "mimeType": "image/jpeg",
                 "sha256Hash": sha256_hash,
                 "integrityStatus": "VALID",
-                "metadata": {
-                    "event_type": event_dict.get("event_type"),
-                    "severity": event_dict.get("severity"),
-                    "track_id": event_dict.get("track_id"),
-                    "object_class": event_dict.get("object_class"),
-                    "confidence": event_dict.get("confidence"),
-                    "bbox": event_dict.get("bbox"),
-                    "zone_name": event_dict.get("zone_name"),
-                },
+                "metadata": metadata,
                 "createdBy": actor,
             }
 
@@ -142,13 +150,13 @@ class EvidenceCapture:
                     action="evidence.capture",
                     entity_type="evidence",
                     entity_id=evidence_id,
-                    details={"event_id": event_id, "camera_id": camera_id, "type": "SNAPSHOT"},
+                    details={"event_id": event_id, "camera_id": camera_id, "type": evidence_type},
                     actor=actor,
                 )
 
             logger.info(
-                "[EVIDENCE] Captured %s for %s (%d bytes, sha256=%s...)",
-                evidence_id, event_id, file_size, sha256_hash[:12],
+                "[EVIDENCE] Captured %s (%s) for %s (%d bytes, sha256=%s...)",
+                evidence_id, evidence_type, event_id, file_size, sha256_hash[:12],
             )
 
             # Blockchain anchoring (fire-and-forget, non-blocking)

@@ -25,6 +25,7 @@ export function useAiAlerts() {
           cameraName: aiAlert.cameraName,
           eventType: mapEventType(aiAlert.eventType),
           title: aiAlert.title,
+          message: aiAlert.message,
           severity: aiAlert.severity as BorderAlert["severity"],
           trackId: aiAlert.trackId,
           confidence: aiAlert.confidence,
