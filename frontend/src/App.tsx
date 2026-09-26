@@ -14,7 +14,6 @@ import { CommandDashboardView } from './views/CommandDashboardView';
 import { CamerasMonitoringView } from './views/CamerasMonitoringView';
 import { AiAnalyticsView } from './views/AiAnalyticsView';
 import { AnprView } from './views/AnprView';
-import { IntrusionZonesView } from './views/IntrusionZonesView';
 import { EventIntelligenceView } from './views/EventIntelligenceView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { ReportsView } from './views/ReportsView';
@@ -214,9 +213,13 @@ export const AppInner: React.FC = () => {
     fetchDashboardStats();
     fetchReports();
     fetchZones();
-    // Periodic refresh for dashboard stats
+    // Periodic refresh for dashboard stats and the alerts list
     const statsInterval = setInterval(fetchDashboardStats, 10000);
-    return () => clearInterval(statsInterval);
+    const alertsInterval = setInterval(fetchAlerts, 10000);
+    return () => {
+      clearInterval(statsInterval);
+      clearInterval(alertsInterval);
+    };
   }, [fetchCameras, fetchAlerts, fetchDashboardStats, fetchReports, fetchZones]);
 
   // Default selected camera to the first registered camera once known
@@ -404,9 +407,6 @@ export const AppInner: React.FC = () => {
         )}
         {currentPath === 'ai-analytics' && <AiAnalyticsView />}
         {currentPath === 'anpr' && <AnprView records={anprRecords} cameras={cameras} onAddRecord={handleAddAnprRecord} />}
-        {currentPath === 'intrusion-zones' && (
-          <IntrusionZonesView zones={zones} cameras={cameras} alerts={alerts} onSaveZone={handleSaveZone} onDeleteZone={handleDeleteZone} />
-        )}
         {currentPath === 'event-intelligence' && (
           <EventIntelligenceView
             alerts={[...alerts.filter(a => !a.source || a.source !== 'AI'), ...aiAlerts]}

@@ -75,10 +75,10 @@ class ObjectTracker:
         self._model = None
         self._class_names: dict[int, str] = {}
         self._frame_count = 0
-        # Temporal confirmation: track consecutive-frame appearance per spatial region
-        self._detection_history: dict[str, int] = {}  # region_key -> consecutive count
+        # Temporal confirmation: observation count per tracked object (class_track_id)
+        self._detection_history: dict[str, int] = {}  # key -> consecutive count
         self._confirm_frames = settings.TEMPORAL_CONFIRM_FRAMES
-        # Movement tracking: track center position history per class+grid region
+        # Movement tracking: track center position history per tracked object
         # key -> list of (frame_idx, center_x, center_y)
         self._position_history: dict[str, list[tuple[int, float, float]]] = {}
         # Static detection filter: total frames a detection has been observed
@@ -175,9 +175,16 @@ class ObjectTracker:
                     if conf < self.confidence:
                         continue
 
-                    # Filter: minimum bounding box area
+                    # Filter: minimum bounding box area (frame-relative).
+                    # NOT applied to person: distant people legitimately occupy
+                    # well under MIN_BBOX_AREA_PCT of the frame (verified with
+                    # real footage: high-conf 0.47-0.81 standing-person boxes of
+                    # 15x28..19x38 px measured 0.11-0.20% and were all dropped).
+                    # Confidence + aspect + temporal confirmation still gate
+                    # person detections, so the area floor only remains for
+                    # vehicles and other classes where it catches noise.
                     bbox_area_pct = (x2 - x1) * (y2 - y1) / (w * h) * 100
-                    if bbox_area_pct < settings.MIN_BBOX_AREA_PCT:
+                    if cls_name != "person" and bbox_area_pct < settings.MIN_BBOX_AREA_PCT:
                         continue
 
                     # Filter: aspect ratio for person class (tree trunks are tall/narrow)
@@ -203,12 +210,15 @@ class ObjectTracker:
         tracked_objects = []
         current_keys: set[str] = set()
         for obj in candidates:
-            # Create spatial key: quantize position to 5% grid cells
+            # Confirmation key: stable per tracked object. Keying on the
+            # ByteTrack id (instead of a quantized spatial grid cell) keeps
+            # the observation count accumulating while a person moves, so a
+            # walking target is confirmed once and stays visible instead of
+            # flickering every time its center crosses a 5% cell boundary.
+            # Movement position (center) is still tracked for the static filter.
             cx = (obj.bbox[0] + obj.bbox[2]) / 2 / w  # normalized center x
             cy = (obj.bbox[1] + obj.bbox[3]) / 2 / h  # normalized center y
-            gx = int(cx * 20)  # 5% grid
-            gy = int(cy * 20)
-            key = f"{obj.class_name}_{gx}_{gy}"
+            key = f"{obj.class_name}_{obj.track_id}"
             current_keys.add(key)
 
             # Temporal confirmation: require N frames within a sliding window
@@ -255,13 +265,19 @@ class ObjectTracker:
         # NOTE: position_history is NOT cleared on disappearance —
         # it persists so static detection filter can detect objects that
         # reappear at the same location across gaps (tree trunks, poles).
-        # Clean up very old entries (>200 frames) to bound memory.
+        # Clean up entries whose most recent observation is old (>200 frames)
+        # — keyed on the LAST frame so long-lived tracks are not evicted
+        # while they are still being observed.
         cutoff_frame = self._frame_count - 200
         stale_pos = [k for k in self._position_history
-                     if self._position_history[k] and self._position_history[k][0][0] < cutoff_frame]
+                     if self._position_history[k] and self._position_history[k][-1][0] < cutoff_frame]
         for k in stale_pos:
             del self._position_history[k]
             self._total_frames_seen.pop(k, None)
+        # Bound memory of id-keyed observation counts (track ids churn forever)
+        if len(self._total_frames_seen) > 4096:
+            for old_key in list(self._total_frames_seen.keys())[:1024]:
+                del self._total_frames_seen[old_key]
 
         total_time = (time.time() - total_start) * 1000
         self._frame_count += 1
@@ -278,15 +294,24 @@ class ObjectTracker:
         )
 
     def reset(self):
-        """Reset tracker state — creates a fresh model instance to clear ByteTrack state."""
+        """Reset tracking state in place — keeps the loaded YOLO model (and
+        its CUDA context) alive so local-video loop restarts are near-instant
+        and never reload weights every cycle. Clears all Python-side history
+        plus ultralytics' persistent ByteTrack state (when the installed
+        version exposes a tracker reset)."""
         self._frame_count = 0
         self._detection_history.clear()
         self._position_history.clear()
+        self._total_frames_seen.clear()
         if self._model is not None:
             try:
-                from ultralytics import YOLO
-                self._model = YOLO(self.model_path)
-                self._class_names = self._model.names
+                predictor = getattr(self._model, "predictor", None)
+                trackers = getattr(predictor, "trackers", None) if predictor is not None else None
+                if trackers:
+                    for t in trackers:
+                        reset_fn = getattr(t, "reset", None)
+                        if callable(reset_fn):
+                            reset_fn()
             except Exception:
                 pass
 

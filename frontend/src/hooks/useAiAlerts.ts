@@ -11,6 +11,12 @@ export function useAiAlerts() {
   const operatorActionsRef = useRef<Record<string, "ACKNOWLEDGED" | "RESOLVED">>({});
 
   const processMetadata = useCallback((metadata: AiTrackingMetadata) => {
+    // The backend only includes an `alerts` key on frames where the alert
+    // lifecycle changed (created/updated/resolved). Ordinary detection
+    // frames carry detections/events but no alerts key — treating those as
+    // "empty incoming set" would mass-resolve every alert on any frame
+    // without the key (a status regression race).
+    if (!metadata || !("alerts" in metadata)) return;
     const incoming: AiAlert[] = metadata.alerts || [];
     setAiAlerts((prev) => {
       const next: Record<string, BorderAlert> = { ...prev };

@@ -159,6 +159,8 @@ const CameraTile: React.FC<CameraTileProps> = ({ camera, token, zones, onOpen, o
   const events = stream.metadata?.events || [];
   const aiProcessing = stream.status?.ai_processing ?? false;
   const health = stream.status?.camera;
+  const sourceType = health?.sourceType ?? stream.metadata?.camera?.sourceType ?? camera.sourceType;
+  const isLocalVideo = sourceType === 'video';
   const zoneCtl = useIntrusionZoneController({
     cameraId: camera.id,
     zones,
@@ -199,6 +201,9 @@ const CameraTile: React.FC<CameraTileProps> = ({ camera, token, zones, onOpen, o
           <span className="text-[10px] text-on-surface-variant truncate max-w-[100px]">{camera.name}</span>
         </div>
         <div className="flex items-center gap-1.5">
+          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${isLocalVideo ? 'bg-warning-container text-warning' : 'bg-success-container text-success'}`}>
+            {isLocalVideo ? 'VIDEO' : 'LIVE'}
+          </span>
           {isRealAi && (
             <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold flex items-center gap-0.5 ${aiProcessing ? 'bg-success-container text-success' : 'bg-error-container text-error'}`}>
               <span className={`w-1 h-1 rounded-full ${aiProcessing ? 'bg-success' : 'bg-error'}`} />
@@ -316,6 +321,8 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
   const events = stream.metadata?.events || [];
   const aiProcessing = stream.status?.ai_processing ?? false;
   const health = stream.status?.camera;
+  const sourceType = health?.sourceType ?? stream.metadata?.camera?.sourceType ?? camera.sourceType;
+  const isLocalVideo = sourceType === 'video';
   const zoneCtl = useIntrusionZoneController({
     cameraId: camera.id,
     zones,
@@ -427,6 +434,9 @@ const SingleCameraView: React.FC<SingleCameraViewProps> = ({ camera, cameras, to
                 <span className="text-[11px] text-on-surface font-medium">&mdash; {camera.name}</span>
               </div>
               <div className="flex items-center gap-2 text-[10px]">
+                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${isLocalVideo ? 'bg-warning-container text-warning' : 'bg-success-container text-success'}`}>
+                  {isLocalVideo ? 'VIDEO' : 'LIVE'}
+                </span>
                 {isRealAi && (
                   <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold flex items-center gap-1 ${aiProcessing ? 'bg-success-container text-success' : 'bg-error-container text-error'}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${aiProcessing ? 'bg-success' : 'bg-error'}`} />

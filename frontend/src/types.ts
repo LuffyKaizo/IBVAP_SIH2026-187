@@ -30,6 +30,8 @@ export interface CameraFeed {
   name: string; // e.g. "BOP NORTH"
   sector: string; // e.g. "Sector Alpha - Post 4"
   rtspUrl: string; // e.g. "rtsp://192.168.1.101:554/live/ch0"
+  /** Capture type: "rtsp" | "webcam" | "video" (local file). */
+  sourceType?: string;
   location: string; // e.g. "North Perimeter Gate"
   coordinates: string; // e.g. "34.0522° N, 118.2437° W"
   fps: number;

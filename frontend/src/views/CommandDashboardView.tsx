@@ -237,8 +237,10 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
                       <span className="text-[10px] text-on-surface-variant truncate">· {camera.location}</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-success" />
-                      <span className="text-[9px] text-success font-bold">LIVE</span>
+                      <span className={`w-1.5 h-1.5 rounded-full ${camera.sourceType === 'video' ? 'bg-warning' : 'bg-success'}`} />
+                      <span className={`text-[9px] font-bold ${camera.sourceType === 'video' ? 'text-warning' : 'text-success'}`}>
+                        {camera.sourceType === 'video' ? 'VIDEO' : 'LIVE'}
+                      </span>
                     </div>
                   </div>
 

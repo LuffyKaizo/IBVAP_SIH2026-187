@@ -396,17 +396,27 @@ class TestVideoLoop:
         tracker.reset()
         assert len(tracker._position_history) == 0
 
-    def test_tracker_reset_recreates_model(self):
-        """Tracker.reset() must recreate the YOLO model when it was loaded."""
+    def test_tracker_reset_keeps_model(self):
+        """Tracker.reset() must clear state but keep the loaded YOLO model.
+
+        The old implementation recreated the model on every local-video EOF,
+        which stalled the stream at each loop boundary (blank/placeholder
+        frames while YOLO reloaded). Reset is now in-place: counters and
+        histories clear, the model instance is retained.
+        """
         from ai.tracking.tracker import ObjectTracker
         tracker = ObjectTracker()
         # Model is lazy-loaded; force initialization
         tracker.load_model()
         old_model = tracker._model
         assert old_model is not None, "Model must be loaded before reset test"
+        tracker._frame_count = 464
+        tracker._detection_history[1] = True
         tracker.reset()
         assert tracker._model is not None
-        assert tracker._model is not old_model
+        assert tracker._model is old_model, "reset() must not reload the YOLO model"
+        assert tracker._frame_count == 0
+        assert len(tracker._detection_history) == 0
 
     def test_pipeline_state_clear_resets_frame_count(self):
         """PipelineState.clear() must reset frames_processed to 0."""

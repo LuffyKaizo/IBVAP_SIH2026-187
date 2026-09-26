@@ -41,7 +41,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         <div className="p-2 bg-surface-container-low border-b border-outline-variant flex gap-1.5 flex-wrap">
           {[
             { p: 'command-dashboard', l: 'DASHBOARD' }, { p: 'cameras', l: 'CAMERAS' }, { p: 'ai-analytics', l: 'AI' },
-            { p: 'anpr', l: 'ANPR' }, { p: 'intrusion-zones', l: 'ZONES' }, { p: 'event-intelligence', l: 'ALERTS' },
+            { p: 'anpr', l: 'ANPR' }, { p: 'event-intelligence', l: 'ALERTS' },
             { p: 'analytics', l: 'ANALYTICS' }, { p: 'reports', l: 'REPORTS' }, { p: 'settings', l: 'SETTINGS' },
           ].map((btn) => (
             <button key={btn.p} onClick={() => { onNavigate?.(btn.p as NavPath); onClose(); }}

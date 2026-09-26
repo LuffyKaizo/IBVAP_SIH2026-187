@@ -5,7 +5,6 @@ export type NavPath =
   | 'cameras'
   | 'ai-analytics'
   | 'anpr'
-  | 'intrusion-zones'
   | 'event-intelligence'
   | 'analytics'
   | 'reports'
@@ -41,7 +40,6 @@ const NAV_GROUPS: NavGroupData[] = [
       { path: 'command-dashboard', label: 'Dashboard', icon: 'dashboard', shortcut: '⌘1' },
       { path: 'cameras', label: 'Cameras', icon: 'videocam', shortcut: '⌘2' },
       { path: 'event-intelligence', label: 'Alerts', icon: 'crisis_alert', badge: 3 },
-      { path: 'intrusion-zones', label: 'Zones', icon: 'fence' },
     ],
   },
   {

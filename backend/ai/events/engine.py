@@ -170,6 +170,9 @@ class EventEngine:
                     event.timestamp = now
                     del self._active_events[key]
                     self._track_missing_frames.pop(key, None)
+                    # Deliver the final RESOLVED transition so the pipeline can
+                    # persist status and the UI receives the resolution.
+                    active_events.append(event)
             else:
                 self._track_missing_frames.pop(key, None)
 
@@ -233,9 +236,15 @@ class EventEngine:
             event_type = 'PERSON_INTRUSION' if obj.class_name == 'person' else 'VEHICLE_INTRUSION'
             event_key = self._make_key(camera_id, track_id, zone.id, event_type)
             if event_key in self._active_events:
-                self._active_events[event_key].status = 'RESOLVED'
-                self._active_events[event_key].timestamp = now
+                resolved = self._active_events[event_key]
+                resolved.status = 'RESOLVED'
+                resolved.timestamp = now
                 del self._active_events[event_key]
+                # Deliver the final RESOLVED transition for this OUTSIDE
+                # crossing so the pipeline persists it and the UI clears the
+                # alert explicitly (instead of relying on a missing-field
+                # heuristic downstream).
+                active_events.append(resolved)
         self._track_zone_state[state_key] = is_inside
 
     def _process_tripwire(self, track_id, obj, zone, camera_id, norm_x, norm_y, now, active_events):

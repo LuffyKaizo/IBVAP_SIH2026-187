@@ -879,6 +879,51 @@ async def delete_zone(
     return {"error": "Zone not found"}
 
 
+@app.get("/alerts")
+async def get_alerts(
+    severity: Optional[str] = Query(None),
+    camera: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    _user: UserContext = Depends(require_permission(Permission.ALERT_READ)),
+):
+    """Recent alerts from the events/alerts DB tables.
+
+    This is the read path for the Express /api/alerts proxy so the UI's
+    Alerts/Notifications list reflects real pipeline output (persisted
+    by the AI service) instead of the never-populated Express memory store.
+    """
+    if not (_alert_repo and is_available()):
+        return {"alerts": []}
+    try:
+        alerts = await _alert_repo.list_recent(limit=limit)
+    except Exception:
+        return {"alerts": []}
+
+    # Enrich with camera names (BorderAlert.cameraName is always rendered)
+    camera_names: dict = {}
+    if _camera_repo and is_available():
+        for a in alerts:
+            cid = a.get("cameraId") or ""
+            if cid and cid not in camera_names:
+                try:
+                    cam = await _camera_repo.get(cid)
+                    camera_names[cid] = (cam.name if cam else cid)
+                except Exception:
+                    camera_names[cid] = cid
+    for a in alerts:
+        a["cameraName"] = camera_names.get(a.get("cameraId") or "", a.get("cameraId") or "")
+        if not isinstance(a.get("evidenceChecklist"), list):
+            a["evidenceChecklist"] = []
+        a["trackId"] = str(a.get("trackId") if a.get("trackId") is not None else "")
+
+    # Optional filters (used by the Express /api/alerts proxy)
+    if severity and severity.upper() != "ALL":
+        alerts = [a for a in alerts if (a.get("severity") or "").upper() == severity.upper()]
+    if camera and camera.upper() != "ALL":
+        alerts = [a for a in alerts if (a.get("cameraId") or "").lower() == camera.lower()]
+    return {"alerts": alerts}
+
+
 # ──────────────────────────────────────────────────────────────────
 # Standalone Detection Endpoint
 # ──────────────────────────────────────────────────────────────────

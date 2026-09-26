@@ -277,6 +277,21 @@ class PipelineState:
             "repeatedEntry": event.get("repeated_entry", False),
         }
 
+    def _lifecycle_status(self, event_dict, existing):
+        """Latest lifecycle status for an existing alert episode.
+
+        The engine drives DETECTED -> ACTIVE -> RESOLVED per event_id.
+        The status sent to the UI (and stored back) must follow that
+        lifecycle — never regress to the CREATE-time status (which froze
+        alerts at DETECTED forever) and never drop a RESOLVED transition.
+        """
+        status = event_dict.get("status")
+        if status in ("DETECTED", "ACTIVE", "RESOLVED"):
+            if existing is not None:
+                existing["status"] = status
+            return status
+        return (existing or {}).get("status", "ACTIVE")
+
     def set_events(self, events):
         """Attach security events and AI-generated alerts to the latest metadata.
         Persists only on status transitions (DETECTED→ACTIVE→RESOLVED).
@@ -330,23 +345,29 @@ class PipelineState:
                     elif action == "ESCALATE":
                         # Escalate existing alert severity + metadata
                         alert["id"] = existing["id"]
-                        alert["status"] = existing.get("status", "ACTIVE")
+                        alert["status"] = self._lifecycle_status(event_dict, existing)
                         alerts.append(alert)
                         self._record_alert(event_dict, alert)
+                        # Persist lifecycle transitions (no-op when unchanged)
+                        event_future = self._persist_event_lifecycle(event_dict, alert)
                         # Allow evidence capture on meaningful escalation
                         if (self._evidence_capture
                                 and event_dict.get("status") == "DETECTED"):
                             frame = self.latest_frame
                             if frame is not None:
-                                event_future = self._persist_event_lifecycle(event_dict, alert)
                                 self._schedule_persist(
                                     self._capture_after_event(event_future, event_dict, frame)
                                 )
                     else:  # UPDATE — metadata only
                         alert["id"] = existing["id"]
-                        alert["status"] = existing.get("status", "ACTIVE")
+                        alert["status"] = self._lifecycle_status(event_dict, existing)
                         alerts.append(alert)
                         self._record_alert(event_dict, alert)
+                        # Persist lifecycle transitions (DETECTED->ACTIVE->
+                        # RESOLVED). _persist_event_lifecycle skips when the
+                        # status is unchanged, so this writes at most twice
+                        # per episode — and RESOLVED now actually reaches DB.
+                        self._persist_event_lifecycle(event_dict, alert)
 
                 self.latest_metadata["events"] = serialized_events
                 self.latest_metadata["alerts"] = alerts
@@ -538,8 +559,14 @@ class PipelineState:
         # 4. UPDATE status on RESOLVED
         if new_status == "RESOLVED" and self._event_repo:
             await self._event_repo.update_status(event_id, "RESOLVED")
+
             # Clean up tracking for resolved events
             self._persisted_events.pop(event_id, None)
+
+        # 5. Keep the alerts row's status in sync with the event lifecycle so
+        #    the REST alerts read path shows ACTIVE/RESOLVED correctly.
+        if new_status in ("ACTIVE", "RESOLVED") and self._alert_repo and alert_dict.get("id"):
+            await self._alert_repo.update_status(alert_dict["id"], new_status)
 
     def _do_persist_anpr(self, result):
         """Persist ANPR result (insert-once)."""
@@ -677,6 +704,29 @@ class PipelineState:
             self._persisted_alerts.clear()
             self._persisted_anpr.clear()
             self._context_contexts.clear()
+            self._active_alerts.clear()
+            self._alert_first_seen.clear()
+            self._alert_by_event.clear()
+
+    def clear_for_loop(self):
+        """Clear overlay/alert state for a local-video loop restart.
+
+        Unlike clear(), the last decoded frame and all counters are kept so
+        the MJPEG stream never blanks (placeholder) between loop iterations;
+        detections/events/alerts are emptied so no stale overlays from the
+        previous pass are rendered.
+        """
+        with self.lock:
+            if self.latest_metadata is not None:
+                self.latest_metadata["detections"] = []
+                self.latest_metadata["events"] = []
+                self.latest_metadata["alerts"] = []
+                self.latest_metadata["faces"] = []
+                self.latest_metadata["active_tracks"] = 0
+            self._context_contexts.clear()
+            self._persisted_events.clear()
+            self._persisted_alerts.clear()
+            self._persisted_anpr.clear()
             self._active_alerts.clear()
             self._alert_first_seen.clear()
             self._alert_by_event.clear()
@@ -843,11 +893,16 @@ class ProcessingPipeline:
                             continue
                         self.state.video_connected = True
                         continue
-                    # Local video reached EOF — restart cleanly
+                    # Local video reached EOF — loop seamlessly for the rest
+                    # of the process. The last frame stays on the stream
+                    # (no blank/placeholder), tracker state resets in place
+                    # (model stays loaded — no per-loop YOLO reload), and
+                    # reopen is retried a bounded number of times because a
+                    # local file can be transiently locked right after
+                    # release(). Live/network sources never take this path.
                     print("[IBVAP-PIPELINE] Video EOF, restarting...")
-                    cap.release()
                     self._tracker.reset()
-                    self.state.clear()
+                    self.state.clear_for_loop()
                     if self._event_engine:
                         self._event_engine.resolve_all()
                     if self._behavior_engine:
@@ -856,11 +911,25 @@ class ProcessingPipeline:
                         self._context_engine._track_states.clear()
                     if self._temporal:
                         self._temporal.resolve_all()
-                    cap = VideoCapture(source=self._video_source, source_type=self._video_source_type)
+                    reopened = False
+                    for attempt in range(3):
+                        if self._stop_event.is_set():
+                            break
+                        if attempt > 0:
+                            time.sleep(0.2)
+                        cap.release()
+                        new_cap = VideoCapture(source=self._video_source,
+                                               source_type=self._video_source_type)
+                        if new_cap.open():
+                            cap = new_cap
+                            reopened = True
+                            break
+                        new_cap.release()
+                        print("[IBVAP-PIPELINE] Loop reopen attempt %d failed" % (attempt + 1))
+                    if not reopened:
+                        break
                     self._capture = cap
                     self.state._capture = cap
-                    if not cap.open():
-                        break
                     continue
                 # Check AI enabled state
                 ai_enabled = self.state.get_ai_enabled()
