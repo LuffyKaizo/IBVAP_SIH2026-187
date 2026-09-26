@@ -145,16 +145,16 @@ class BehaviorEngine:
         if should and not st.is_loitering:
             st.is_loitering = True
             st.event_id = str(uuid.uuid4())[:8]
-            return self._make_event("LOITERING", "MEDIUM", cam, tid, cn, obj, now, "DETECTED",
+            return self._make_event("LOITERING", "LOW", cam, tid, cn, obj, now, "DETECTED",
                 event_id=st.event_id, duration_seconds=round(dur,1), displacement=round(disp,4), reason=reason)
         elif should and st.is_loitering:
-            return self._make_event("LOITERING", "MEDIUM", cam, tid, cn, obj, now, "ACTIVE",
+            return self._make_event("LOITERING", "LOW", cam, tid, cn, obj, now, "ACTIVE",
                 event_id=st.event_id, duration_seconds=round(dur,1), displacement=round(disp,4), reason=reason)
         elif not should and st.is_loitering:
             eid = st.event_id
             # Remove state entirely so re-entry creates fresh episode
             self._loitering.pop(key, None)
-            return self._make_event("LOITERING", "MEDIUM", cam, tid, cn, obj, now, "RESOLVED",
+            return self._make_event("LOITERING", "LOW", cam, tid, cn, obj, now, "RESOLVED",
                 event_id=eid, reason="Movement increased")
         return None
 

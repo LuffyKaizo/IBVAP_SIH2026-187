@@ -81,7 +81,7 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
   onActionAlert,
   onSelectCamera,
 }) => {
-  const [filterSeverity, setFilterSeverity] = useState<'ALL' | 'CRITICAL' | 'HIGH' | 'MEDIUM'>('ALL');
+  const [filterSeverity, setFilterSeverity] = useState<'ALL' | 'CRITICAL' | 'MEDIUM' | 'LOW'>('ALL');
   const [activeTab, setActiveTab] = useState<'INCIDENTS' | 'RULES' | 'NIGHT_CURFEW'>('INCIDENTS');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [sirenActive, setSirenActive] = useState(false);
@@ -96,7 +96,12 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
   const chimeAudioRef = useRef<HTMLAudioElement | null>(null);
   const sirenTimerRef = useRef<number | null>(null);
 
-  const filteredAlerts = alerts.filter((a) => filterSeverity === 'ALL' || a.severity === filterSeverity);
+  const filteredAlerts = alerts.filter((a) => {
+    if (filterSeverity === 'ALL') return true;
+    // Legacy rows may still carry HIGH — group them under the MEDIUM section.
+    const sev = a.severity === 'HIGH' ? 'MEDIUM' : a.severity;
+    return sev === filterSeverity;
+  });
   const activeAlert = alerts.find((a) => a.id === selectedAlertId) || filteredAlerts[0] || alerts[0];
   const activeAlertId = activeAlert?.id;
   const activeSnapshotUrl = activeAlert?.snapshotUrl;
@@ -290,7 +295,7 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] text-on-surface-variant font-medium mr-1">Filter:</span>
-            {(['ALL', 'CRITICAL', 'HIGH', 'MEDIUM'] as const).map((sev) => (
+            {(['ALL', 'CRITICAL', 'MEDIUM', 'LOW'] as const).map((sev) => (
               <button
                 key={sev}
                 onClick={() => setFilterSeverity(sev)}
@@ -309,7 +314,8 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
               {filteredAlerts.map((alert, idx) => {
                 const isSelected = alert.id === activeAlert.id;
                 const isCrit = alert.severity === 'CRITICAL';
-                const isHigh = alert.severity === 'HIGH';
+                const isMed = alert.severity === 'HIGH' || alert.severity === 'MEDIUM';
+                const severityLabel = alert.severity === 'HIGH' ? 'MEDIUM' : alert.severity;
                 return (
                   <button
                     key={alert.id}
@@ -318,12 +324,12 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
                       isSelected
                         ? 'bg-primary/10 border-primary shadow-sm'
                         : 'bg-surface hover:bg-surface-container-low border-outline-variant/60'
-                    } ${isCrit ? 'border-l-error' : isHigh ? 'border-l-warning' : 'border-l-outline'} border border-outline-variant/50`}
+                    } ${isCrit ? 'border-l-error' : isMed ? 'border-l-warning' : 'border-l-outline'} border border-outline-variant/50`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded ${isCrit ? 'bg-error text-on-error' : isHigh ? 'bg-warning text-on-warning' : 'bg-surface-container-high text-on-surface-variant'}`}>
-                          {alert.severity}
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded ${isCrit ? 'bg-error text-on-error' : isMed ? 'bg-warning text-on-warning' : 'bg-surface-container-high text-on-surface-variant'}`}>
+                          {severityLabel}
                         </span>
                         <span className="font-mono text-[11px] font-bold text-on-surface">{alert.id}</span>
                       </div>
@@ -366,9 +372,9 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
                         <span className="block text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Severity</span>
                         <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded mt-0.5 ${
                           activeAlert.severity === 'CRITICAL' ? 'bg-error text-on-error' :
-                          activeAlert.severity === 'HIGH' ? 'bg-warning text-on-warning' :
+                          activeAlert.severity === 'HIGH' || activeAlert.severity === 'MEDIUM' ? 'bg-warning text-on-warning' :
                           'bg-surface-container-high text-on-surface-variant'
-                        }`}>{activeAlert.severity}</span>
+                        }`}>{activeAlert.severity === 'HIGH' ? 'MEDIUM' : activeAlert.severity}</span>
                       </div>
                       <div>
                         <span className="block text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Incident ID</span>
@@ -566,8 +572,8 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[
             { title: 'Restricted-Zone Entry', icon: 'fence', severity: 'CRITICAL', desc: 'Fires when object centroid intersects a restricted polygon.', trigger: 'Centroid Ingress' },
-            { title: 'Loitering Dwell', icon: 'timer', severity: 'MEDIUM', desc: 'Fires when entity remains in buffer area beyond threshold.', trigger: 'Dwell exceeded' },
-            { title: 'Unauthorized Vehicle', icon: 'no_crash', severity: 'HIGH', desc: 'Flags vehicles in non-designated lanes or after curfew.', trigger: 'ANPR Miss' },
+            { title: 'Loitering Dwell', icon: 'timer', severity: 'LOW', desc: 'Fires when entity remains in buffer area beyond threshold.', trigger: 'Dwell exceeded' },
+            { title: 'Unauthorized Vehicle', icon: 'no_crash', severity: 'MEDIUM', desc: 'Flags vehicles in non-designated lanes or after curfew.', trigger: 'ANPR Miss' },
             { title: 'Person Convergence', icon: 'group_work', severity: 'HIGH', desc: 'Flags multiple track IDs approaching within proximity threshold.', trigger: 'Proximity threshold' },
             { title: 'Night Perimeter Motion', icon: 'nightlight', severity: 'CRITICAL', desc: 'Amplified motion filter during curfew hours.', trigger: 'Curfew + Motion' },
             { title: 'Watchlist Plate Match', icon: 'warning', severity: 'CRITICAL', desc: 'Fires when OCR matches active blacklist entry.', trigger: 'Exact Match' },

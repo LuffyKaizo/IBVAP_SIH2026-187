@@ -121,7 +121,7 @@ def test_vehicle_enters():
     events = engine.process_frame(track, "CAM-01", [zone])
     assert len(events) == 1
     assert events[0].event_type == "VEHICLE_INTRUSION"
-    assert events[0].severity == "HIGH"
+    assert events[0].severity == "MEDIUM"
     print("  PASS: vehicle enters -> VEHICLE_INTRUSION")
 
 

@@ -63,7 +63,7 @@ def test_person_loitering_detected():
     loiter = [e for e in ev if e["event_type"] == "LOITERING"]
     assert len(loiter) == 1
     assert loiter[0]["status"] == "DETECTED"
-    assert loiter[0]["severity"] == "MEDIUM"
+    assert loiter[0]["severity"] == "LOW"
     print("  PASS: loitering detected")
 def test_no_duplicate_loitering():
     eng = BehaviorEngine()

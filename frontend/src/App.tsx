@@ -1,6 +1,6 @@
 import { useAiAlerts } from './hooks/useAiAlerts';
 import { useAiAnpr } from './hooks/useAiAnpr';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { Sidebar, NavPath } from './components/Sidebar';
 import { Footer } from './components/Footer';
@@ -86,6 +86,18 @@ export const AppInner: React.FC = () => {
   // AI alert integration
   const { aiAlerts, processMetadata: processAiMetadata, handleAction: handleAiAlertAction, clearAlerts: clearAiAlerts } = useAiAlerts();
   const { aiAnprRecords, processMetadata: processAiAnprMetadata } = useAiAnpr(cameras);
+
+  // Single alert feed for every view:
+  // - WS-derived aiAlerts win by id when present (live lifecycle + operator actions)
+  // - REST AI alerts not yet mirrored over WS fill in after refresh/navigation
+  // - Legacy HIGH rows are projected onto the three-section model (MEDIUM)
+  const mergedAlerts = useMemo<BorderAlert[]>(() => {
+    const wsIds = new Set(aiAlerts.map((a) => a.id));
+    const rest = alerts.filter((a) => a.source !== 'AI' || !wsIds.has(a.id));
+    return [...rest, ...aiAlerts].map((a) =>
+      a.severity === 'HIGH' ? { ...a, severity: 'MEDIUM' } : a,
+    );
+  }, [alerts, aiAlerts]);
 
   // Combined metadata processor for alerts, ANPR, hourly activity, and suspicious events
   const processAllAiMetadata = useCallback((metadata: any) => {
@@ -363,7 +375,7 @@ export const AppInner: React.FC = () => {
         isOperational={isOperational}
         onOpenDiagnostics={() => setIsDiagnosticsModalOpen(true)}
         onNavigateToAlerts={() => setCurrentPath('event-intelligence')}
-        activeAlertCount={alerts.filter((a) => a.status === 'ACTIVE').length}
+        activeAlertCount={mergedAlerts.filter((a) => a.status === 'ACTIVE').length}
         userName={user?.full_name || user?.email || 'USER'}
         userRole={user?.role || 'VIEWER'}
         onLogout={handleLogout}
@@ -374,7 +386,7 @@ export const AppInner: React.FC = () => {
       <Sidebar
         currentPath={currentPath}
         onNavigate={setCurrentPath}
-        activeAlertCount={alerts.filter((a) => a.status === 'ACTIVE').length}
+        activeAlertCount={mergedAlerts.filter((a) => a.status === 'ACTIVE').length}
         isOpen={isSidebarOpen}
         onToggle={() => setIsSidebarOpen((p) => !p)}
         userRole={user?.role}
@@ -384,7 +396,7 @@ export const AppInner: React.FC = () => {
         {currentPath === 'command-dashboard' && (
           <CommandDashboardView
             stats={dashboardStats}
-            alerts={[...alerts.filter(a => !a.source || a.source !== "AI"), ...aiAlerts]}
+            alerts={mergedAlerts}
             cameras={cameras}
             zones={zones}
             onNavigate={setCurrentPath}
@@ -409,7 +421,7 @@ export const AppInner: React.FC = () => {
         {currentPath === 'anpr' && <AnprView records={anprRecords} cameras={cameras} onAddRecord={handleAddAnprRecord} />}
         {currentPath === 'event-intelligence' && (
           <EventIntelligenceView
-            alerts={[...alerts.filter(a => !a.source || a.source !== 'AI'), ...aiAlerts]}
+            alerts={mergedAlerts}
             suspiciousEvents={suspiciousEvents}
             selectedAlertId={selectedAlertId}
             onSelectAlert={setSelectedAlertId}

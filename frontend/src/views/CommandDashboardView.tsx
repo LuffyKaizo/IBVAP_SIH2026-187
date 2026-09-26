@@ -350,7 +350,8 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
           <div className="flex flex-col gap-2.5 max-h-[520px] overflow-y-auto pr-1">
             {alerts.map((alert) => {
               const isCrit = alert.severity === 'CRITICAL';
-              const isHigh = alert.severity === 'HIGH';
+              const isMed = alert.severity === 'HIGH' || alert.severity === 'MEDIUM';
+              const severityLabel = alert.severity === 'HIGH' ? 'MEDIUM' : alert.severity;
               const isAck = acknowledgedAlerts[alert.id];
 
               return (
@@ -365,7 +366,7 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
                       ? 'bg-surface border-outline-variant/40 opacity-60'
                       : isCrit
                       ? 'bg-error-container/30 border-error hover:bg-error-container/50'
-                      : isHigh
+                      : isMed
                       ? 'bg-warning-container/40 border-warning hover:bg-warning-container/60'
                       : 'bg-surface border-outline-variant hover:border-primary/30'
                   } border border-outline-variant/50`}
@@ -376,12 +377,12 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
                         className={`text-[9px] font-bold px-2 py-0.5 rounded ${
                           isCrit
                             ? 'bg-error text-on-error'
-                            : isHigh
+                            : isMed
                             ? 'bg-warning text-on-warning'
                             : 'bg-surface-container-high text-on-surface'
                         }`}
                       >
-                        {alert.severity}
+                        {severityLabel}
                       </span>
                       {isAck && (
                         <span className="text-[9px] bg-surface-container-high text-on-surface-variant px-2 py-0.5 rounded font-mono">
@@ -459,14 +460,14 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
                   className={`px-2 py-0.5 rounded text-[9px] font-bold shrink-0 ${
                     item.severity === 'CRITICAL'
                       ? 'bg-error-container text-on-error-container'
-                      : item.severity === 'HIGH'
+                      : item.severity === 'HIGH' || item.severity === 'MEDIUM'
                       ? 'bg-warning-container text-on-warning-container'
-                      : item.severity === 'MEDIUM'
+                      : item.severity === 'LOW'
                       ? 'bg-surface-container-high text-on-surface-variant'
                       : 'bg-primary-container text-on-primary-container'
                   }`}
                 >
-                  {item.severity}
+                  {item.severity === 'HIGH' ? 'MEDIUM' : item.severity}
                 </span>
               </div>
             ))}

@@ -20,6 +20,36 @@ from ai.context.engine import ContextEngine
 from ai.risk.engine import RiskEngine
 
 
+# Three-section alert severity model (spec): CRITICAL / MEDIUM / LOW only.
+# Raw AI event types AND their mapped BorderAlert event types are keyed so the
+# same policy normalizes live pipeline alerts and legacy DB rows alike.
+_ALERT_SEVERITY_POLICY = {
+    "PERSON_INTRUSION": "CRITICAL",       # person + zone entry
+    "BORDER_INTRUSION": "CRITICAL",       # mapped persona of the above
+    "VEHICLE_INTRUSION": "MEDIUM",        # vehicle + zone entry / unauthorized vehicle
+    "RESTRICTED_ZONE_VEHICLE": "MEDIUM",  # mapped persona of the above
+    "LOITERING": "LOW",
+    "NIGHT_MOVEMENT": "MEDIUM",
+}
+
+
+def normalize_alert_severity(event_type: str, severity: str) -> str:
+    """Project any event/alert severity onto the three-section model.
+
+    Defined event types get their exact spec severity. Everything else
+    (suspicious activity, context events, legacy rows) keeps CRITICAL/MEDIUM/LOW
+    and maps HIGH down to MEDIUM so HIGH never reaches the UI.
+    """
+    fixed = _ALERT_SEVERITY_POLICY.get(event_type)
+    if fixed:
+        return fixed
+    if severity == "HIGH":
+        return "MEDIUM"
+    if severity in ("CRITICAL", "MEDIUM", "LOW"):
+        return severity
+    return "MEDIUM"
+
+
 class PipelineState:
     def __init__(self, camera_id="CAM-01", camera_name=""):
         self.lock = threading.Lock()
@@ -197,8 +227,8 @@ class PipelineState:
         }
         alert_event_type = alert_type_map.get(etype, etype)
 
-        # Map severity
-        severity = event.get("severity", "MEDIUM")
+        # Map severity onto the three-section model (CRITICAL/MEDIUM/LOW)
+        severity = normalize_alert_severity(etype, event.get("severity", "MEDIUM"))
 
         # Generate title (spec: intrusion zone alerts use one clear title)
         titles = {
@@ -211,7 +241,8 @@ class PipelineState:
         title = titles.get(etype, "Security Event")
 
         # Operator-facing incident message (spec: exact alert text, e.g.
-        # "Person #2 entered Intrusion Zone 'Gate 3 Restricted Area' on CAM-05.")
+        # "Person #2 entered Intrusion Zone 'Gate 3 Restricted Area' on CAM-05."
+        # and "Person #18 loitering near CAM-02.")
         message = ""
         if etype in ("PERSON_INTRUSION", "VEHICLE_INTRUSION"):
             default_cls = "person" if etype == "PERSON_INTRUSION" else "vehicle"
@@ -225,6 +256,14 @@ class PipelineState:
             message = "%s entered Intrusion Zone '%s' on %s." % (
                 subject, zone_label, event.get("camera_id", "")
             )
+        elif etype == "LOITERING":
+            cls = str(event.get("object_class") or "person")
+            label = cls[:1].upper() + cls[1:]
+            if track_id >= 0:
+                subject = "%s #%s" % (label, track_id)
+            else:
+                subject = label
+            message = "%s loitering near %s." % (subject, event.get("camera_id", ""))
 
         # Generate reason
         if etype == "SUSPICIOUS_ACTIVITY" and reasons:
@@ -1011,11 +1050,16 @@ class ProcessingPipeline:
                             ev_dict["fence_proximity"] = track_ctx.fence_proximity
                             ev_dict["direction"] = track_ctx.direction
                             ev_dict["repeated_entry"] = track_ctx.repeated_entry
-                        # Escalate severity if risk is higher
+                        # Escalate severity if risk is higher, then project the
+                        # result onto the three-section alert model so event
+                        # metadata and derived alerts never surface HIGH.
                         from ai.risk.engine import RiskEngine as RE
                         base_sev = ev_dict.get("severity", "MEDIUM")
                         risk_sev = risk.severity
-                        ev_dict["severity"] = RE.effective_severity(base_sev, risk_sev)
+                        ev_dict["severity"] = normalize_alert_severity(
+                            ev_dict.get("event_type", ""),
+                            RE.effective_severity(base_sev, risk_sev),
+                        )
 
                     # Run ANPR if configured
                     anpr_results = []

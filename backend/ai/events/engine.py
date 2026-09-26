@@ -38,7 +38,7 @@ class SecurityEvent:
     """A security intrusion event."""
     event_id: str
     event_type: str  # PERSON_INTRUSION | VEHICLE_INTRUSION
-    severity: str  # CRITICAL | HIGH
+    severity: str  # CRITICAL | MEDIUM (three-section alert model)
     camera_id: str
     zone_id: str
     zone_name: str
@@ -191,7 +191,7 @@ class EventEngine:
 
         if is_inside and not was_inside:
             event_type = "PERSON_INTRUSION" if obj.class_name == "person" else "VEHICLE_INTRUSION"
-            severity = "CRITICAL" if event_type == "PERSON_INTRUSION" else "HIGH"
+            severity = "CRITICAL" if event_type == "PERSON_INTRUSION" else "MEDIUM"
             event_key = self._make_key(camera_id, track_id, zone.id, event_type)
 
             if event_key not in self._active_events:
@@ -261,7 +261,7 @@ class EventEngine:
             )
             if crossed:
                 event_type = "PERSON_INTRUSION" if obj.class_name == "person" else "VEHICLE_INTRUSION"
-                severity = "CRITICAL" if zone.severity == "CRITICAL" else "HIGH"
+                severity = "CRITICAL" if obj.class_name == "person" else "MEDIUM"
                 event_key = self._make_key(camera_id, track_id, zone.id, event_type)
 
                 if event_key not in self._active_events:
@@ -282,7 +282,6 @@ class EventEngine:
                     )
                     self._active_events[event_key] = event
                     self._event_history.append(event)
-                    active_events.append(event)
 
         self._track_prev_position[pos_key] = (norm_x, norm_y)
 

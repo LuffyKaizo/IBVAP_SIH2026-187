@@ -78,30 +78,31 @@ check("evidenceChecklist has items", len(alert["evidenceChecklist"]) >= 2)
 check("status is DETECTED", alert["status"] == "DETECTED")
 check("source is AI", alert["source"] == "AI")
 
-# TEST 2: VEHICLE_INTRUSION -> HIGH alert
-print("\n--- TEST 2: VEHICLE_INTRUSION -> HIGH alert ---")
+# TEST 2: VEHICLE_INTRUSION -> MEDIUM alert
+print("\n--- TEST 2: VEHICLE_INTRUSION -> MEDIUM alert ---")
 alert = PipelineState._event_to_alert(make_event(
-    event_type="VEHICLE_INTRUSION", severity="HIGH", object_class="car", track_id=7))
+    event_type="VEHICLE_INTRUSION", severity="MEDIUM", object_class="car", track_id=7))
 check("eventType is RESTRICTED_ZONE_VEHICLE", alert["eventType"] == "RESTRICTED_ZONE_VEHICLE")
-check("severity is HIGH", alert["severity"] == "HIGH")
+check("severity is MEDIUM", alert["severity"] == "MEDIUM")
 check("trackId is #7", alert["trackId"] == "#7")
 
-# TEST 3: LOITERING -> MEDIUM alert
-print("\n--- TEST 3: LOITERING -> MEDIUM alert ---")
+# TEST 3: LOITERING -> LOW alert
+print("\n--- TEST 3: LOITERING -> LOW alert ---")
 alert = PipelineState._event_to_alert(make_event(
-    event_type="LOITERING", severity="MEDIUM", track_id=3,
+    event_type="LOITERING", severity="LOW", track_id=3,
     reason="Low movement for 30+ seconds (disp: 0.012)"))
 check("eventType is LOITERING", alert["eventType"] == "LOITERING")
-check("severity is MEDIUM", alert["severity"] == "MEDIUM")
+check("severity is LOW", alert["severity"] == "LOW")
 check("reason contains loitering info", "Low movement" in alert["reason"])
+check("message is spec loitering text", alert["message"] == "Person #3 loitering near CAM-01.")
 
-# TEST 4: NIGHT_MOVEMENT -> HIGH alert
-print("\n--- TEST 4: NIGHT_MOVEMENT -> HIGH alert ---")
+# TEST 4: NIGHT_MOVEMENT -> MEDIUM alert (HIGH normalized at the alert boundary)
+print("\n--- TEST 4: NIGHT_MOVEMENT -> MEDIUM alert ---")
 alert = PipelineState._event_to_alert(make_event(
     event_type="NIGHT_MOVEMENT", severity="HIGH", track_id=5,
     reason="Movement during night hours (23:00)"))
 check("eventType is NIGHT_MOVEMENT", alert["eventType"] == "NIGHT_MOVEMENT")
-check("severity is HIGH", alert["severity"] == "HIGH")
+check("severity is MEDIUM", alert["severity"] == "MEDIUM")
 
 # TEST 5: SUSPICIOUS_ACTIVITY with reasons
 print("\n--- TEST 5: SUSPICIOUS_ACTIVITY with reasons ---")

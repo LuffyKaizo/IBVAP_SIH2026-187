@@ -1,4 +1,4 @@
-export type AlertSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO' | 'NORMAL';
+export type AlertSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO' | 'NORMAL';
 
 export type CameraStatus = 'ONLINE' | 'DEGRADED' | 'OFFLINE' | 'RECONNECTING' | 'SYNCHRONIZING';
 
@@ -296,7 +296,7 @@ export interface AiAlert {
   title: string;
   /** Exact operator-facing incident sentence (absent on non-intrusion events). */
   message?: string;
-  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO';
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
   trackId: string;
   confidence: number;
   zone: string;

@@ -80,10 +80,37 @@ def test_vehicle_intrusion_alert_title_and_message():
     )
 
 
-def test_non_intrusion_events_have_no_message():
+def test_loitering_event_has_spec_message():
+    """Spec §13: loitering alerts carry the exact operator-facing sentence."""
     alert = PipelineState._event_to_alert(make_event(event_type="LOITERING"))
-    assert alert["message"] == ""
+    assert alert["message"] == "Person #2 loitering near CAM-05."
     assert alert["title"] == "Perimeter Loitering Detected"
+    # Three-section model: loitering is always LOW regardless of input severity
+    assert alert["severity"] == "LOW"
+
+
+# ── Three-section severity model ──────────────────────────────────────
+
+def test_three_section_severity_model():
+    """Spec: person entry -> CRITICAL, vehicle entry -> MEDIUM, loitering ->
+    LOW; HIGH never reaches an alert regardless of input severity."""
+    person = PipelineState._event_to_alert(make_event())
+    vehicle = PipelineState._event_to_alert(make_event(
+        event_type="VEHICLE_INTRUSION", severity="HIGH", object_class="truck"))
+    loiter = PipelineState._event_to_alert(
+        make_event(event_type="LOITERING", severity="MEDIUM"))
+    night = PipelineState._event_to_alert(
+        make_event(event_type="NIGHT_MOVEMENT", severity="HIGH"))
+    unknown = PipelineState._event_to_alert(
+        make_event(event_type="CUSTOM_EVENT", severity="HIGH"))
+
+    assert person["severity"] == "CRITICAL"
+    assert vehicle["severity"] == "MEDIUM"
+    assert loiter["severity"] == "LOW"
+    assert night["severity"] == "MEDIUM"
+    assert unknown["severity"] == "MEDIUM"
+    for alert in (person, vehicle, loiter, night, unknown):
+        assert alert["severity"] in ("CRITICAL", "MEDIUM", "LOW")
 
 
 # ── Event-id keyed dedup ──────────────────────────────────────────────
@@ -140,13 +167,20 @@ def test_different_zones_same_track_create_independent_alerts():
 
 
 def test_escalation_still_works_within_event():
+    """A severity rise within one episode still escalates the alert.
+
+    Uses SUSPICIOUS_ACTIVITY because the spec pins intrusion/loitering/night
+    severities to fixed values; suspicious activity keeps the risk-driven
+    HIGH->CRITICAL progression that exercises the escalation path.
+    """
     state = PipelineState()
-    low = make_event(severity="HIGH")
+    low = make_event(event_type="SUSPICIOUS_ACTIVITY", severity="HIGH")
     alert_low = PipelineState._event_to_alert(low)
+    assert alert_low["severity"] == "MEDIUM"  # HIGH normalized to the 3-section model
     assert state._should_create_or_escalate(low, alert_low)[0] == "CREATE"
     state._record_alert(low, alert_low)
 
-    high = make_event(severity="CRITICAL")
+    high = make_event(event_type="SUSPICIOUS_ACTIVITY", severity="CRITICAL")
     action, existing = state._should_create_or_escalate(
         high, PipelineState._event_to_alert(high))
     assert action == "ESCALATE"
