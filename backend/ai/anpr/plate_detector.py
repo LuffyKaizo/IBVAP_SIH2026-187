@@ -1,10 +1,12 @@
 """License plate region detection — YOLO primary, OpenCV fallback.
 
-Primary: YOLOv8 plate detection model resolved from settings.PLATE_MODEL_PATH
-(default: models/license_plate/best.pt — active experiment).
-Fallback: Classical OpenCV contour analysis when YOLO is unavailable or fails.
+Primary: README-based YOLOv8 plate detection model resolved from
+settings.PLATE_MODEL_PATH (default: models/license_plate/license_plate_detector.pt
+— the checkpoint documented by the project README, single class
+'license_plate'). Fallback: Classical OpenCV contour analysis when YOLO is
+unavailable or fails.
 
-The previous detector (models/license_plate/license_plate_detector.pt) is
+The previous experimental detector (models/license_plate/best.pt) is
 preserved for rollback and is NOT loaded unless PLATE_MODEL_PATH points to it.
 """
 
@@ -28,9 +30,9 @@ class PlateCandidate:
 def _find_model() -> Optional[Path]:
     """Resolve the active license-plate detection model (project-relative).
 
-    Uses settings.PLATE_MODEL_PATH (default models/license_plate/best.pt).
-    Does not fall back to the previous detector — during the experiment the
-    old model must never be loaded implicitly.
+    Uses settings.PLATE_MODEL_PATH (default models/license_plate/
+    license_plate_detector.pt — README-based checkpoint). Does not fall back
+    to the previous experimental model — it must never be loaded implicitly.
     """
     path = Path(settings.PLATE_MODEL_PATH)
     if path.exists():

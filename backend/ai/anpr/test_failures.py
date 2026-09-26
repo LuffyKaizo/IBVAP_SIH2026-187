@@ -229,7 +229,7 @@ except Exception as e:
 print()
 print('--- TEST 13: Blurred plate ---')
 try:
-    data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'anpr_test'))
+    data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'data', 'anpr_test'))
     img = cv2.imread(os.path.join(data_dir, 'plate_MH12AB1234.jpg'))
     blurred = cv2.GaussianBlur(img, (31, 31), 9)
     text, conf = ocr.read_text(detector.preprocess_for_ocr(blurred))

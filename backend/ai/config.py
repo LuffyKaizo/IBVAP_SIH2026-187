@@ -124,10 +124,11 @@ class Settings:
 
     # ANPR / License Plate Recognition
     ANPR_ENABLED: bool = os.getenv("ANPR_ENABLED", "true").lower() == "true"
-    # Active license-plate detector (experimental replacement).
-    # Rollback: point this at models/license_plate/license_plate_detector.pt
-    # or revert the integration commit.
-    PLATE_MODEL_PATH: str = os.getenv("PLATE_MODEL_PATH", str(MODELS_DIR / "license_plate" / "best.pt"))
+    # Active license-plate detector: README-based model
+    # (Muhammad-Zeerak-Khan Automatic-License-Plate-Recognition-using-YOLOv8,
+    # SHA-256 8EC3B254A6C87610F037A90957462CAFA11A9C03224E33A28C6A1D1AC2AC51B0).
+    # Rollback/experiment: point this at models/license_plate/best.pt.
+    PLATE_MODEL_PATH: str = os.getenv("PLATE_MODEL_PATH", str(MODELS_DIR / "license_plate" / "license_plate_detector.pt"))
     ANPR_OCR_ENGINE: str = os.getenv("ANPR_OCR_ENGINE", "easyocr")  # easyocr | tesseract | none
     ANPR_OCR_GPU: bool = os.getenv("ANPR_OCR_GPU", "false").lower() == "true"  # EasyOCR GPU mode
     ANPR_OCR_PASSES: int = int(os.getenv("ANPR_OCR_PASSES", "2"))  # OCR inference passes per plate (1-2)

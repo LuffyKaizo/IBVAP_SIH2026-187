@@ -56,7 +56,7 @@ def main():
     print("ANPR ACCURACY BENCHMARK (real EasyOCR inference)")
     print("=" * 78)
 
-    data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'anpr_test'))
+    data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'data', 'anpr_test'))
     plate_files = sorted(f for f in os.listdir(data_dir)
                          if f.startswith('plate_') and f.endswith('.jpg'))
     vehicle_files = sorted(f for f in os.listdir(data_dir)

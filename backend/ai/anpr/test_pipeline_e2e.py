@@ -31,7 +31,7 @@ def main():
     print("END-TO-END ANPR PIPELINE TEST")
     print("=" * 70)
 
-    data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'anpr_test'))
+    data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'data', 'anpr_test'))
 
     # Initialize components
     print("\n[1] Initializing components...")

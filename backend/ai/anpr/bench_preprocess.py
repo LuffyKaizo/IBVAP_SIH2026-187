@@ -96,7 +96,7 @@ def main():
     print("=" * 78)
     print("PREPROCESSING VARIANT BENCHMARK (real EasyOCR inference)")
     print("=" * 78)
-    data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'anpr_test'))
+    data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'data', 'anpr_test'))
     files = sorted([f for f in os.listdir(data_dir) if f.startswith('plate_') and f.endswith('.jpg')])
     files = [f for f in files if expected_of(f)]
 

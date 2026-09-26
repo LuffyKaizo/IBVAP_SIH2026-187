@@ -1,9 +1,10 @@
-"""Integration test: active license-plate detector is models/license_plate/best.pt.
+"""Integration test: active license-plate detector is the README model
+(models/license_plate/license_plate_detector.pt).
 
 Verifies:
 - project-relative model configuration (models/ structure)
-- active plate model path + SHA-256 of the verified experiment model
-- previous plate detector preserved on disk but NOT loaded at runtime
+- active plate model path + SHA-256 of the README-documented checkpoint
+- previous experimental model (best.pt) preserved on disk but NOT loaded
 - vehicle model resolves to models/vehicle/yolov8n.pt
 - plate detection executes on a real camera/video frame
 
@@ -23,9 +24,10 @@ import numpy as np
 from ai.config import settings, MODELS_DIR, REPO_ROOT
 from ai.anpr.plate_detector import PlateDetector
 
-EXPECTED_BEST_SHA = "1C1EBEE2A1DD54701F612A24D3300734618EE829A7980A6B23602511C786B032"
-ACTIVE_PLATE = MODELS_DIR / "license_plate" / "best.pt"
-OLD_PLATE = MODELS_DIR / "license_plate" / "license_plate_detector.pt"
+# SHA-256 of the README checkpoint (upstream repo copy == Google Drive file)
+EXPECTED_ACTIVE_SHA = "8EC3B254A6C87610F037A90957462CAFA11A9C03224E33A28C6A1D1AC2AC51B0"
+ACTIVE_PLATE = MODELS_DIR / "license_plate" / "license_plate_detector.pt"
+OLD_PLATE = MODELS_DIR / "license_plate" / "best.pt"
 VEHICLE_MODEL = MODELS_DIR / "vehicle" / "yolov8n.pt"
 
 
@@ -66,30 +68,32 @@ def main():
     check("plate model configured", settings.PLATE_MODEL_PATH == str(ACTIVE_PLATE), settings.PLATE_MODEL_PATH)
     check("vehicle model exists", VEHICLE_MODEL.exists())
     check("active plate model exists", ACTIVE_PLATE.exists())
-    check("previous plate model preserved", OLD_PLATE.exists())
-    check("active model is best.pt", os.path.basename(settings.PLATE_MODEL_PATH) == "best.pt")
+    check("previous experimental model preserved", OLD_PLATE.exists())
+    check("active model is license_plate_detector.pt",
+          os.path.basename(settings.PLATE_MODEL_PATH) == "license_plate_detector.pt")
 
-    # --- 2. Integrity of the verified experiment model ---
+    # --- 2. Integrity of the README-documented checkpoint ---
     print("\n[2] Active plate model integrity")
-    check("best.pt SHA-256 matches verified model",
-          sha256(ACTIVE_PLATE) == EXPECTED_BEST_SHA, sha256(ACTIVE_PLATE)[:16] + "...")
+    check("license_plate_detector.pt SHA-256 matches README checkpoint",
+          sha256(ACTIVE_PLATE) == EXPECTED_ACTIVE_SHA, sha256(ACTIVE_PLATE)[:16] + "...")
 
     # --- 3. Runtime load: exactly one plate model, the active one ---
     print("\n[3] Runtime load")
     detector = PlateDetector()
     check("plate detector initialized (YOLO)", detector._yolo_available)
-    check("loaded path IS models/license_plate/best.pt",
+    check("loaded path IS models/license_plate/license_plate_detector.pt",
           detector._model_path is not None and
           os.path.samefile(detector._model_path, ACTIVE_PLATE),
           str(detector._model_path))
-    check("loaded path is NOT the previous detector",
+    check("loaded path is NOT the previous experimental model",
           detector._model_path is None or
-          not str(detector._model_path).endswith("license_plate_detector.pt"))
+          not str(detector._model_path).endswith("best.pt"))
     names = detector._yolo_model.names if detector._yolo_model else {}
-    check("plate model class names == {0: 'plate'}", names == {0: 'plate'}, str(names))
+    check("plate model class names == {0: 'license_plate'}",
+          names == {0: 'license_plate'}, str(names))
     n_params = sum(p.numel() for p in detector._yolo_model.model.parameters())
-    check("plate model params ~43.6M (yolov8l-scale)",
-          40e6 < n_params < 47e6, f"{n_params/1e6:.2f}M")
+    check("plate model params ~3.0M (yolov8n-scale)",
+          2.5e6 < n_params < 4e6, f"{n_params/1e6:.2f}M")
 
     # --- 4. Vehicle model still loads (YOLOv8n unchanged) ---
     print("\n[4] Vehicle detector")
@@ -108,10 +112,14 @@ def main():
     check("test video exists", os.path.exists(video), os.path.basename(video))
     cap = cv2.VideoCapture(video)
     frame = None
-    for _ in range(30):  # grab a mid-stream frame
-        ok, f = cap.read()
-        if ok:
-            frame = f
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 558)  # known frame with two visible plates
+    ok, frame = cap.read()
+    if not ok:
+        frame = None
+        for _ in range(30):  # fallback: grab a mid-stream frame
+            ok, f = cap.read()
+            if ok:
+                frame = f
     cap.release()
     check("frame read from real video", frame is not None,
           f"{frame.shape[1]}x{frame.shape[0]}" if frame is not None else "")
@@ -135,6 +143,8 @@ def main():
         check("plate detector executed on real frame without error", True)
         check("YOLO path actually invoked (not OpenCV fallback)",
               detector._yolo_available and detector._model_path is not None)
+        check("plate detections found on known frame (full-frame or ROI)",
+              total_cands >= 1, f"total={total_cands}")
         if roi_cands:
             crop = detector.extract_plate_crop(roi, roi_cands[0])
             check("plate crop extracted for OCR", crop is not None and crop.size > 0,

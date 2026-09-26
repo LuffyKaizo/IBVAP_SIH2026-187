@@ -76,7 +76,7 @@ def main():
         sys.exit(1)
 
     # --- Step 2: Discover test images ---
-    data_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'anpr_test')
+    data_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'data', 'anpr_test')
     data_dir = os.path.normpath(data_dir)
 
     if not os.path.isdir(data_dir):
