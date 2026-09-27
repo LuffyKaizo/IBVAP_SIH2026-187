@@ -73,6 +73,16 @@ export interface BorderAlert {
   fenceProximity?: boolean;
   direction?: string;
   repeatedEntry?: boolean;
+  /** Source-frame evidence target (AI alerts): pixel bbox of the tracked
+   * object on the exact event frame — used to overlay the target box and
+   * render the 3-artifact evidence set. */
+  eventId?: string;
+  bbox?: { x1: number; y1: number; x2: number; y2: number };
+  frameWidth?: number;
+  frameHeight?: number;
+  objectClass?: string;
+  sourceFps?: number;
+  processingFps?: number;
 }
 
 export interface AnprRecord {
@@ -312,6 +322,14 @@ export interface AiAlert {
   fenceProximity?: boolean;
   direction?: string;
   repeatedEntry?: boolean;
+  /** Source-frame evidence target (AI alerts; see AiAlert). */
+  eventId?: string;
+  bbox?: { x1: number; y1: number; x2: number; y2: number };
+  frameWidth?: number;
+  frameHeight?: number;
+  objectClass?: string;
+  sourceFps?: number;
+  processingFps?: number;
 }
 
 

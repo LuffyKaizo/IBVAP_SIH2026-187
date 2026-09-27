@@ -148,10 +148,13 @@ def test_end_of_video():
     for frame, info in cap.frame_generator(target_fps=100):
         count += 1
     status = cap.get_status()
+    at_eof = cap.at_eof
     cap.release()
     print(f"Frames consumed: {count}")
-    print(f"Connected after EOF: {status.connected}")
-    passed = count > 0 and not cap.is_connected
+    print(f"At EOF (awaiting rewind): {at_eof}, status: {status.status}")
+    # Local EOF is a normal loop event: the session stays CONNECTED so the
+    # frontend health badge never flips mid-loop (rewind() seeks to frame 0).
+    passed = count > 0 and at_eof and status.connected and status.status == "CONNECTED"
     print(f"RESULT: {passed}")
     return passed
 

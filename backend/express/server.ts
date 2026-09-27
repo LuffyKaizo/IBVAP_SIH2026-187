@@ -131,6 +131,32 @@ async function startServer() {
     proxyToAI('/status', req, res);
   });
 
+  // Tactical geospatial map — proxy to FastAPI (PART 10)
+  app.get('/api/tactical/overview', verifyToken, (req, res) => {
+    proxyToAI('/tactical/overview', req, res);
+  });
+  app.put('/api/tactical/cameras/:cameraId/geo', verifyToken, requireRole('ADMIN', 'OPERATOR'), (req, res) => {
+    proxyToAI('/tactical/cameras/' + encodeURIComponent(String(req.params.cameraId)) + '/geo', req, res);
+  });
+  app.post('/api/tactical/zero-lines', verifyToken, requireRole('ADMIN', 'OPERATOR'), (req, res) => {
+    proxyToAI('/tactical/zero-lines', req, res);
+  });
+  app.put('/api/tactical/zero-lines/:id', verifyToken, requireRole('ADMIN', 'OPERATOR'), (req, res) => {
+    proxyToAI('/tactical/zero-lines/' + encodeURIComponent(String(req.params.id)), req, res);
+  });
+  app.delete('/api/tactical/zero-lines/:id', verifyToken, requireRole('ADMIN', 'OPERATOR'), (req, res) => {
+    proxyToAI('/tactical/zero-lines/' + encodeURIComponent(String(req.params.id)), req, res);
+  });
+  app.post('/api/tactical/buffer-zones', verifyToken, requireRole('ADMIN', 'OPERATOR'), (req, res) => {
+    proxyToAI('/tactical/buffer-zones', req, res);
+  });
+  app.put('/api/tactical/buffer-zones/:id', verifyToken, requireRole('ADMIN', 'OPERATOR'), (req, res) => {
+    proxyToAI('/tactical/buffer-zones/' + encodeURIComponent(String(req.params.id)), req, res);
+  });
+  app.delete('/api/tactical/buffer-zones/:id', verifyToken, requireRole('ADMIN', 'OPERATOR'), (req, res) => {
+    proxyToAI('/tactical/buffer-zones/' + encodeURIComponent(String(req.params.id)), req, res);
+  });
+
   // KPI Dashboard Stats — combine Express in-memory stores with AI backend counts
   app.get('/api/dashboard/stats', verifyToken, async (_req, res) => {
     try {

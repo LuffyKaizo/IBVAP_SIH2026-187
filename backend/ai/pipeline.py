@@ -300,6 +300,16 @@ class PipelineState:
             "severity": severity,
             "trackId": f"#{track_id}" if track_id >= 0 else "#?",
             "confidence": round(event.get("confidence", 0) * 100),
+            # Authoritative target data (PART 2): the alerting track's
+            # source-frame pixel bbox on the exact event frame. Additive
+            # fields — legacy/UI consumers unaffected when absent.
+            "eventId": event.get("event_id", ""),
+            "bbox": event.get("bbox") or None,
+            "frameWidth": event.get("frame_width") or None,
+            "frameHeight": event.get("frame_height") or None,
+            "objectClass": event.get("object_class") or None,
+            "sourceFps": event.get("source_fps") or None,
+            "processingFps": event.get("processing_fps") or None,
             "zone": zone_name or "Default Zone",
             "reason": reason,
             "evidenceChecklist": evidence,
@@ -334,8 +344,9 @@ class PipelineState:
     def set_events(self, events):
         """Attach security events and AI-generated alerts to the latest metadata.
         Persists only on status transitions (DETECTED→ACTIVE→RESOLVED).
-        Captures evidence on the DETECTED transition (full-frame SNAPSHOT plus
-        an annotated TARGET_CROP for intrusion events).
+        Captures evidence on the DETECTED transition from the exact event
+        frame: original SNAPSHOT + ANNOTATED full frame + TARGET_CROP for
+        every alerting event (spec PART 6).
         Deduplicates alerts per event_id (one alert + evidence per intrusion
         episode; re-entry creates a fresh alert). Escalates on severity rise.
         Uses thread-safe scheduling for database operations.
@@ -362,6 +373,24 @@ class PipelineState:
                             "bbox": e.bbox,
                             "status": e.status,
                         }
+                    # Authoritative source-frame dims (PART 2): attach the
+                    # exact event-frame width/height so bbox coordinates stay
+                    # interpretable through alerts, evidence and the UI.
+                    if self.latest_metadata is not None:
+                        event_dict.setdefault(
+                            "frame_width", self.latest_metadata.get("frame_width", 0)
+                        )
+                        event_dict.setdefault(
+                            "frame_height", self.latest_metadata.get("frame_height", 0)
+                        )
+                        # Capture-rate context for the evidence dossier (PART 9).
+                        event_dict.setdefault(
+                            "source_fps", self.source_fps or 0
+                        )
+                        event_dict.setdefault(
+                            "processing_fps",
+                            round(self.processing_fps or 0, 1),
+                        )
                     serialized_events.append(event_dict)
                     alert = self._event_to_alert(event_dict, self.camera_name)
 
@@ -616,94 +645,82 @@ class PipelineState:
 
     @staticmethod
     def _build_target_crop(frame, event_dict):
-        """Crop the target bbox from the frame with drawn intrusion annotations.
+        """Full-body target crop with margin + baked-in annotations (spec PART 4/5/8).
 
-        Returns an annotated BGR numpy crop, or None when the frame/bbox are
-        not usable. The red box + INTRUSION label + class/track/confidence/zone
-        are baked into the pixels so evidence images show the actual target
-        (spec: target-centric capture with annotations on the image itself).
+        Delegates to ai.evidence.annotate so crop geometry, frame clamping and
+        label rendering live in one reviewed place. Returns an annotated BGR
+        crop, or None when the frame/bbox are not usable.
         """
+        from ai.evidence.annotate import build_target_crop
         try:
-            if frame is None or not isinstance(frame, np.ndarray):
-                return None
-            bbox = event_dict.get("bbox") or {}
-            x1, y1 = float(bbox.get("x1", -1)), float(bbox.get("y1", -1))
-            x2, y2 = float(bbox.get("x2", -1)), float(bbox.get("y2", -1))
-            if x2 <= x1 or y2 <= y1:
-                return None
-            h, w = frame.shape[:2]
-            # Expand by configurable margin, then clamp to the frame
-            margin = max(0.0, min(float(settings.EVIDENCE_TARGET_CROP_MARGIN), 0.5))
-            dx, dy = (x2 - x1) * margin, (y2 - y1) * margin
-            x1, y1, x2, y2 = x1 - dx, y1 - dy, x2 + dx, y2 + dy
-            x1, y1 = max(0, int(x1)), max(0, int(y1))
-            x2, y2 = min(w, int(x2)), min(h, int(y2))
-            if x2 - x1 < 8 or y2 - y1 < 8:
-                return None
-            crop = frame[y1:y2, x1:x2].copy()
-            ch, cw = crop.shape[:2]
-
-            # Red target box in crop coordinates
-            cv2.rectangle(crop, (1, 1), (cw - 2, ch - 2), (0, 0, 255), 2)
-
-            # Label banner: INTRUSION / CLASS #track conf% / zone name
-            conf = float(event_dict.get("confidence", 0) or 0)
-            track_id = int(event_dict.get("track_id", -1))
-            cls = str(event_dict.get("object_class") or "target")
-            cls = cls[:1].upper() + cls[1:]
-            if track_id >= 0:
-                target = "%s #%d  %d%%" % (cls, track_id, round(conf * 100))
-            else:
-                target = "%s  %d%%" % (cls, round(conf * 100))
-            lines = ["INTRUSION", target]
-            zone = event_dict.get("zone_name") or ""
-            if zone:
-                lines.append(zone)
-
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            scale = max(0.45, min(0.8, cw / 400.0))
-            thickness = max(1, int(round(scale * 2)))
-            sizes = [cv2.getTextSize(t, font, scale, thickness)[0] for t in lines]
-            banner_w = min(cw, max(s[0] for s in sizes) + 14)
-            banner_h = min(ch, sum(s[1] for s in sizes) + 10 * len(lines) + 4)
-            overlay = crop.copy()
-            cv2.rectangle(overlay, (1, 1), (banner_w, banner_h), (0, 0, 255), -1)
-            cv2.addWeighted(overlay, 0.75, crop, 0.25, 0, crop)
-            y_cursor = 4
-            for text, (tw, th) in zip(lines, sizes):
-                if y_cursor + th + 4 > banner_h:
-                    break
-                cv2.putText(crop, text, (7, y_cursor + th), font, scale,
-                            (255, 255, 255), thickness, cv2.LINE_AA)
-                y_cursor += th + 10
+            crop, _rect, _diag = build_target_crop(
+                frame, event_dict, settings.EVIDENCE_TARGET_CROP_MARGIN
+            )
             return crop
         except Exception:
             return None
 
     async def _capture_and_enqueue_sync(self, event_dict, frame):
-        """Capture evidence and enqueue for sync (non-blocking).
+        """Capture the full evidence set from the EXACT event frame (PART 6).
 
-        Zone-intrusion events capture TWO artifacts from the exact event frame:
-          1. SNAPSHOT    — full scene (context; captured first)
-          2. TARGET_CROP — bbox crop with red box + labels baked in (primary)
+        Every alerting event (person intrusion, vehicle intrusion, loitering,
+        night movement, ...) produces up to three artifacts, each encoded and
+        SHA-256 finalized by the capture service against its exact bytes:
+          1. SNAPSHOT    — original full scene (context; never replaced)
+          2. ANNOTATED   — exact frame + authoritative red bbox + labels
+          3. TARGET_CROP — full-body/vehicle bbox crop with safe margin
         """
         try:
+            from ai.evidence.annotate import annotate_full_frame, build_target_crop
+
             results = []
+            shape = getattr(frame, "shape", None)
+            frame_w = int(shape[1]) if shape and len(shape) >= 2 else 0
+            frame_h = int(shape[0]) if shape and len(shape) >= 1 else 0
+            base_extra = {
+                "frame_width": frame_w,
+                "frame_height": frame_h,
+                "zone_id": event_dict.get("zone_id"),
+                "source_fps": event_dict.get("source_fps"),
+                "processing_fps": event_dict.get("processing_fps"),
+            }
+
+            # 1. Original full context frame — always attempted first.
             full = await self._evidence_capture.capture_snapshot(
-                event_dict, frame, actor="SYSTEM", evidence_type="SNAPSHOT"
+                event_dict, frame, actor="SYSTEM", evidence_type="SNAPSHOT",
+                metadata_extra=base_extra,
             )
             if full:
                 results.append(full)
-            if event_dict.get("event_type") in ("PERSON_INTRUSION", "VEHICLE_INTRUSION"):
-                crop = self._build_target_crop(frame, event_dict)
-                if crop is not None:
-                    cropped = await self._evidence_capture.capture_snapshot(
-                        event_dict, crop, actor="SYSTEM",
-                        evidence_type="TARGET_CROP",
-                        metadata_extra={"is_target_crop": True},
-                    )
-                    if cropped:
-                        results.append(cropped)
+
+            # 2. Annotated full frame: box + labels on the exact event frame.
+            annotated = annotate_full_frame(frame, event_dict)
+            if annotated is not None:
+                ann = await self._evidence_capture.capture_snapshot(
+                    event_dict, annotated, actor="SYSTEM",
+                    evidence_type="ANNOTATED",
+                    metadata_extra=dict(base_extra, is_annotated=True),
+                )
+                if ann:
+                    results.append(ann)
+
+            # 3. Target focus crop: full detection bbox + margin context.
+            crop, rect, _diag = build_target_crop(
+                frame, event_dict, settings.EVIDENCE_TARGET_CROP_MARGIN
+            )
+            if crop is not None:
+                cropped = await self._evidence_capture.capture_snapshot(
+                    event_dict, crop, actor="SYSTEM",
+                    evidence_type="TARGET_CROP",
+                    metadata_extra=dict(
+                        base_extra,
+                        is_target_crop=True,
+                        crop_rect=list(rect) if rect else None,
+                    ),
+                )
+                if cropped:
+                    results.append(cropped)
+
             if self._sync_manager:
                 for r in results:
                     await self._sync_manager.enqueue_evidence(r.get("id", ""), r)
@@ -841,6 +858,7 @@ class ProcessingPipeline:
         self._face_frame_counter = 0
         self._was_ai_enabled = True  # tracks previous AI state for reset-on-reenable
         self._capture = None  # live VideoCapture handle (camera-status reporting)
+        self._loop_generation = 0  # local-video loop cycles since pipeline start
 
     def configure(self, video_source=None, video_source_type=None, model_path=None):
         self._video_source = video_source or settings.VIDEO_SOURCE
@@ -915,6 +933,7 @@ class ProcessingPipeline:
         self.state.ai_processing = True
         print("[IBVAP-PIPELINE] Connected: %s @ %.1f fps" % (self.state.resolution, fps))
         target_interval = 1.0 / settings.INFERENCE_FPS
+        frames_at_rewind = -1
         try:
             while not self._stop_event.is_set():
                 loop_start = time.time()
@@ -932,14 +951,21 @@ class ProcessingPipeline:
                             continue
                         self.state.video_connected = True
                         continue
-                    # Local video reached EOF — loop seamlessly for the rest
-                    # of the process. The last frame stays on the stream
-                    # (no blank/placeholder), tracker state resets in place
-                    # (model stays loaded — no per-loop YOLO reload), and
-                    # reopen is retried a bounded number of times because a
-                    # local file can be transiently locked right after
-                    # release(). Live/network sources never take this path.
-                    print("[IBVAP-PIPELINE] Video EOF, restarting...")
+                    # Local video reached EOF — a NORMAL LOOP EVENT, never a
+                    # disconnect: the camera stays CONNECTED (no DISCONNECTED/
+                    # CONNECTING blip for /status polls and health badges),
+                    # MJPEG/WebSocket clients keep their connections, and the
+                    # last valid frame stays on the stream (no blank/white
+                    # placeholder). Tracker state resets in place (model stays
+                    # loaded — no per-loop YOLO reload). Rewind seeks the SAME
+                    # open decoder back to frame 0: release+reopen churned
+                    # native decoder memory every loop (production RSS grew by
+                    # hundreds of MB per EOF until the process died silently).
+                    # Reopen is only a bounded fallback when seek is
+                    # unsupported. Live/network sources never take this path.
+                    self._loop_generation += 1
+                    print("[IBVAP-PIPELINE] Video EOF, restarting... (%s loop gen %d: rewind, camera stays connected)"
+                          % (self.camera_id, self._loop_generation))
                     self._tracker.reset()
                     self.state.clear_for_loop()
                     if self._event_engine:
@@ -950,6 +976,19 @@ class ProcessingPipeline:
                         self._context_engine._track_states.clear()
                     if self._temporal:
                         self._temporal.resolve_all()
+                    if cap.rewind():
+                        frames_now = cap.get_status().frames_read
+                        if frames_now == frames_at_rewind:
+                            # Zero frames decoded since the last rewind — the
+                            # source is unreadable; back off instead of
+                            # hot-spinning a core on a corrupt file.
+                            time.sleep(0.25)
+                        frames_at_rewind = frames_now
+                        continue
+                    # Fallback: seek unsupported — bounded reopen of the same
+                    # source (retry because a local file can be transiently
+                    # locked right after release()).
+                    print("[IBVAP-PIPELINE] Rewind unsupported for %s, reopening" % self.camera_id)
                     reopened = False
                     for attempt in range(3):
                         if self._stop_event.is_set():

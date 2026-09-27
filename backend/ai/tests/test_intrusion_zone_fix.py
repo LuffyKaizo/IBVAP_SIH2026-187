@@ -294,7 +294,7 @@ class _FakeEvidenceCapture:
         return {"id": "EVD-%d" % len(self.calls), "evidenceType": evidence_type}
 
 
-def test_intrusion_capture_writes_snapshot_then_target_crop():
+def test_intrusion_capture_writes_full_evidence_set():
     state = PipelineState()
     capture = _FakeEvidenceCapture()
     state._evidence_capture = capture
@@ -302,18 +302,30 @@ def test_intrusion_capture_writes_snapshot_then_target_crop():
     frame = _frame()
     result = _run_async(state._capture_and_enqueue_sync(make_event(), frame))
     types = [c[0] for c in capture.calls]
-    assert types == ["SNAPSHOT", "TARGET_CROP"]
-    # SNAPSHOT is the full frame; TARGET_CROP is the smaller annotated crop
-    assert capture.calls[0][1] == frame.shape
-    assert capture.calls[1][1][0] < frame.shape[0]
+    # PART 6: original + annotated full frame + target crop from the event frame
+    assert types == ["SNAPSHOT", "ANNOTATED", "TARGET_CROP"]
+    assert capture.calls[0][1] == frame.shape   # SNAPSHOT = full frame
+    assert capture.calls[1][1] == frame.shape   # ANNOTATED = full frame
+    assert capture.calls[2][1][0] < frame.shape[0]  # TARGET_CROP = smaller
     assert result["evidenceType"] == "TARGET_CROP"
 
 
-def test_non_intrusion_event_captures_only_full_snapshot():
+def test_loitering_event_captures_full_evidence_set():
+    """PART 11: loitering evidence marks the responsible tracked target too."""
     state = PipelineState()
     capture = _FakeEvidenceCapture()
     state._evidence_capture = capture
     state._sync_manager = None
     _run_async(state._capture_and_enqueue_sync(
-        make_event(event_type="LOITERING"), _frame()))
+        make_event(event_type="LOITERING", severity="LOW"), _frame()))
+    assert [c[0] for c in capture.calls] == ["SNAPSHOT", "ANNOTATED", "TARGET_CROP"]
+
+
+def test_event_without_usable_bbox_captures_only_full_snapshot():
+    state = PipelineState()
+    capture = _FakeEvidenceCapture()
+    state._evidence_capture = capture
+    state._sync_manager = None
+    _run_async(state._capture_and_enqueue_sync(
+        make_event(bbox={}), _frame()))
     assert [c[0] for c in capture.calls] == ["SNAPSHOT"]

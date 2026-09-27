@@ -7,8 +7,10 @@ Hardened for IP CCTV / RTSP ingestion:
   OpenCV build; BUFFERSIZE is applied via set() after open because the
   FFMPEG backend rejects it inside the .open(params) list).
 - Bounded exponential backoff reconnect for network sources (MP4 and
-  webcam do not reconnect — they are local resources; MP4 EOF is
-  handled by the pipeline restart path).
+  webcam do not reconnect — they are local resources; MP4 EOF is a
+  normal loop event: read_frame() keeps the session CONNECTED and the
+  pipeline calls rewind() to seek back to frame 0 on the same open
+  decoder — never release+reopen).
 - Stale-frame detection: if no frame arrives within
   FRAME_TIMEOUT_SECONDS, the status reports STALE/UNHEALTHY without
   killing a technically-alive socket.
@@ -101,6 +103,7 @@ class VideoCapture:
         self._last_error: Optional[str] = None
         self._stale: bool = False
         self._stopped: bool = False
+        self._at_eof: bool = False
         # Measured incoming FPS (windowed)
         self._fps_window: list = []
         self._frame_times: list = []
@@ -206,6 +209,7 @@ class VideoCapture:
         self._stopped = False
         self._start_time = time.time()
         self._frames_read = 0
+        self._at_eof = False
         self._total_frames_ever = 0
         self._fps_window = []
         self._status = ST_CONNECTING
@@ -261,6 +265,40 @@ class VideoCapture:
         self._status = ST_RECONNECTING
         return False
 
+    def rewind(self) -> bool:
+        """Seek a local file source back to frame 0 without closing it.
+
+        Local EOF is a normal loop event, not a disconnect: rewinding the
+        same open decoder keeps the camera CONNECTED, leaves MJPEG and
+        WebSocket clients' connections untouched, and avoids the
+        release+reopen cycle that churned native decoder memory on every
+        loop (production RSS grew by hundreds of MB per EOF across 6
+        cameras until the process died silently).
+
+        Returns True when the source is back at frame 0. Returns False for
+        network/webcam sources or when the backend cannot seek — the caller
+        falls back to a bounded reopen.
+        """
+        if self._is_network_source() or self.source_type != "video":
+            return False
+        if self._cap is None or not self._cap.isOpened():
+            return False
+        try:
+            ok = bool(self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0))
+            if ok:
+                ok = self._cap.get(cv2.CAP_PROP_POS_FRAMES) <= 0.5
+        except Exception as e:
+            self._last_error = mask_rtsp_credentials(str(e))
+            ok = False
+        if ok:
+            self._at_eof = False
+            self._stale = False
+            self._last_frame_time = time.time()
+            # Never a DISCONNECTED/CONNECTING blip across the boundary.
+            self._connected = True
+            self._status = ST_CONNECTED
+        return ok
+
     def read_frame(self) -> Optional[np.ndarray]:
         """Read a single frame. Returns BGR numpy array or None."""
         if self._cap is None or not self._cap.isOpened():
@@ -277,6 +315,7 @@ class VideoCapture:
             self._total_frames_ever += 1
             self._last_frame_time = now
             self._stale = False
+            self._at_eof = False
             if self._status in (ST_STALE, ST_RECONNECTING):
                 self._status = ST_CONNECTED
             # measured incoming fps (3-second window)
@@ -289,8 +328,14 @@ class VideoCapture:
             # Alive socket but no frame; stale detection judges health.
             self._last_error = "frame read failed"
             self._stale = True
+        elif self._cap is not None and self._cap.isOpened():
+            # Local file reached EOF — a NORMAL loop event, not a disconnect.
+            # Stay CONNECTED (no DISCONNECTED/CONNECTING blip for /status
+            # polls and frontend health badges); the pipeline calls rewind()
+            # to seek the same open decoder back to frame 0.
+            self._at_eof = True
         else:
-            # Local file reached EOF/end, or the handle died.
+            # The handle itself died — a real disconnect.
             self._connected = False
             self._status = ST_DISCONNECTED
         return None
@@ -394,6 +439,11 @@ class VideoCapture:
     @property
     def is_connected(self) -> bool:
         return self._connected and self._cap is not None and self._cap.isOpened()
+
+    @property
+    def at_eof(self) -> bool:
+        """True while a local file source sits at EOF, awaiting rewind()."""
+        return self._at_eof
 
     def stop(self):
         """Signal generators/reconnect loops to stop; marks status STOPPED."""

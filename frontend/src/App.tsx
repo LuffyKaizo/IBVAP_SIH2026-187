@@ -18,6 +18,7 @@ import { EventIntelligenceView } from './views/EventIntelligenceView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { ReportsView } from './views/ReportsView';
 import { SettingsView } from './views/SettingsView';
+import { TacticalMapView } from './views/TacticalMapView';
 
 import {
   CameraFeed,
@@ -430,6 +431,7 @@ export const AppInner: React.FC = () => {
           />
         )}
         {currentPath === 'analytics' && <AnalyticsView hourlyData={hourlyActivity} />}
+        {currentPath === 'tactical-map' && <TacticalMapView />}
         {currentPath === 'reports' && <ReportsView reports={reports} onGenerateReport={handleGenerateReport} />}
         {currentPath === 'settings' && (
           <SettingsView config={systemConfig} cameras={cameras} onSaveConfig={setSystemConfig} onAddCamera={handleAddCamera} onReplaceCamera={handleReplaceCamera} onDeleteCamera={handleDeleteCamera} authFetch={authFetch} />

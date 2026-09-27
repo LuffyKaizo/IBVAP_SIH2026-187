@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { AIBoundingBoxOverlay } from '../components/AIBoundingBoxOverlay';
 import { AIFaceOverlay } from '../components/AIFaceOverlay';
 import { useIntrusionZoneController, IntrusionZoneLayer, IntrusionZoneButton, ZoneManageMenu, ZoneStatusPanel } from '../components/IntrusionZoneLayer';
+import { streamBaseUrl } from '../lib/streamUrl';
 
 interface CamerasMonitoringViewProps {
   cameras: CameraFeed[];
@@ -109,11 +110,18 @@ function useCameraTileStream(cameraId: string, token: string | null) {
         } catch { /* ignore */ }
       };
       ws.onclose = () => {
+        // Guard: when cleanup() intentionally closes this socket (unmount,
+        // camera switch, StrictMode double-invoke), wsRef has already been
+        // nulled/replaced. Rescheduling here would close the replacement
+        // socket in 3s and re-arm forever -> perpetual reconnect loop with
+        // a brief isConnected=false flicker ("Connecting...") every cycle.
+        if (wsRef.current !== ws) return;
         setState((prev) => ({ ...prev, isConnected: false, metadata: null }));
         if (statusIntervalRef.current) { clearInterval(statusIntervalRef.current); statusIntervalRef.current = null; }
         reconnectRef.current = setTimeout(connectInternal, 3000);
       };
       ws.onerror = () => {
+        if (wsRef.current !== ws) return;
         setState((prev) => ({ ...prev, isConnected: false }));
       };
     } catch {
@@ -127,7 +135,7 @@ function useCameraTileStream(cameraId: string, token: string | null) {
   }, [cameraId, token, connectInternal, cleanup]);
 
   const videoUrl = cameraId && token
-    ? AI_BASE + '/video/stream/' + cameraId + '?token=' + token
+    ? streamBaseUrl(AI_BASE, cameraId) + '/video/stream/' + cameraId + '?token=' + token
     : '';
 
   return { ...state, videoUrl, AI_BASE };

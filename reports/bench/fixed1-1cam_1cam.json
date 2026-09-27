@@ -1,0 +1,59 @@
+{
+  "tag": "fixed1-1cam",
+  "timestamp_utc": "2026-09-26T23:53:56.277520+00:00",
+  "n_cameras": 1,
+  "duration_s": 60.0,
+  "settle_s": 12.0,
+  "register_s": 5.0,
+  "connect_wait_s": 1.0,
+  "ticks": 60,
+  "host": {
+    "cpu_pct_mean": 19.6,
+    "cpu_pct_max": 31.0,
+    "proc_cpu_pct_mean": 154.7,
+    "rss_mb_mean": 1860.5,
+    "rss_mb_max": 1871.1
+  },
+  "gpu": {
+    "util_pct_mean": 17.7,
+    "util_pct_max": 48.0,
+    "mem_used_mb_max": 1080.9
+  },
+  "cameras": [
+    {
+      "camera_id": "BENCH-01",
+      "slot": "1080p30",
+      "source_file": "pexels-george-morina-5293898 (1080p).mp4",
+      "source_fps": 29.97002997002997,
+      "target_fps": 29.97,
+      "resolution": "1920x1080",
+      "analytics_fps": 27.7,
+      "display_fps": 27.7,
+      "metadata_fps": 27.75,
+      "dropped_frames": 134,
+      "drop_per_s": 2.23,
+      "avg_latency_ms": 39.1,
+      "decode_ms": 3.83,
+      "stage_ms": {
+        "track": 13.68,
+        "events": 0.37,
+        "anpr": 4.38,
+        "publish": 10.53,
+        "loop_total": 33.09,
+        "face": 7.65
+      },
+      "ocr_dropped_jobs": 0
+    }
+  ],
+  "settings": {
+    "model_path": "C:\\Users\\SIDDHESH\\OneDrive\\Documents\\GitHub\\SIH2026-187\\models\\vehicle\\yolov8n.pt",
+    "device": "auto",
+    "anpr_enabled": true,
+    "face_detection_enabled": true,
+    "face_detection_interval": 2,
+    "inference_fps_fallback": 10,
+    "ocr_queue_size": 4,
+    "mjpeg_display_max_width": 1280,
+    "zone": "bottom-strip polygon (4 pts)"
+  }
+}

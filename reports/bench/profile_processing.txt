@@ -1,0 +1,43 @@
+         4976284 function calls (4260604 primitive calls) in 24.985 seconds
+
+   Ordered by: internal time
+   List reduced from 1290 to 35 due to restriction <35>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+64128/59535    4.857    0.000    4.684    0.000 {built-in method torch.conv2d}
+2200/1981    3.530    0.002    3.549    0.002 {resize}
+     1615    1.407    0.001    1.478    0.001 {method 'detect' of 'cv2.FaceDetectorYN' objects}
+      748    1.064    0.001    1.116    0.001 {method 'read' of 'cv2.VideoCapture' objects}
+      652    1.005    0.002    1.028    0.002 {imencode}
+      745    0.990    0.001    1.052    0.001 {built-in method time.sleep}
+    49704    0.626    0.000    0.696    0.000 {built-in method torch._C._nn.silu_}
+46614/46590    0.601    0.000    0.780    0.000 {method 'copy' of 'numpy.ndarray' objects}
+217835/1029    0.464    0.000   10.725    0.010 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\torch\nn\modules\module.py:1787(_call_impl)
+4258/4240    0.396    0.000    0.860    0.000 {method 'cpu' of 'torch._C.TensorBase' objects}
+17197/17130    0.349    0.000    0.737    0.000 {built-in method torch.cat}
+      872    0.339    0.000    0.851    0.001 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\ultralytics\utils\nms.py:13(non_max_suppression)
+3013/2981    0.300    0.000    0.371    0.000 {method 'to' of 'torch._C.TensorBase' objects}
+      652    0.294    0.000    6.009    0.009 C:\Users\SIDDHESH\OneDrive\Documents\GitHub\SIH2026-187\backend\ai\pipeline.py:294(update)
+217835/1029    0.291    0.000   10.872    0.011 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\torch\nn\modules\module.py:1779(_wrapped_call_impl)
+     2249    0.270    0.000    0.277    0.000 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\ultralytics\engine\results.py:156(__getitem__)
+   321235    0.264    0.000    0.264    0.000 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\torch\nn\modules\module.py:1959(__getattr__)
+     5226    0.224    0.000    0.285    0.000 {built-in method torch._C._cuda_synchronize}
+      727    0.215    0.000    0.215    0.000 {built-in method torch._ops.torchvision.nms}
+     5768    0.211    0.000    0.246    0.000 {built-in method torch.batch_norm}
+     1742    0.190    0.000   11.564    0.007 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\ultralytics\engine\predictor.py:295(stream_inference)
+     7216    0.149    0.000    0.213    0.000 {built-in method torch.relu_}
+   219979    0.146    0.000    0.146    0.000 {built-in method torch._C._get_tracing_state}
+      145    0.126    0.001    0.148    0.001 {bilateralFilter}
+     8720    0.123    0.000    2.158    0.000 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\ultralytics\nn\modules\block.py:482(forward)
+64128/59535    0.118    0.000    5.161    0.000 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\torch\nn\modules\conv.py:546(_conv_forward)
+    49704    0.116    0.000    6.671    0.000 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\ultralytics\nn\modules\conv.py:80(forward_fuse)
+      248    0.110    0.000    0.117    0.000 {built-in method torch.lstm}
+      871    0.109    0.000    0.193    0.000 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\ultralytics\utils\ops.py:122(scale_boxes)
+4492/4490    0.101    0.000    0.113    0.000 {built-in method torch.max_pool2d}
+     6092    0.097    0.000    0.102    0.000 {method 'clamp_' of 'torch._C.TensorBase' objects}
+275452/60102    0.092    0.000    0.106    0.000 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\torch\nn\modules\module.py:2845(named_modules)
+     4924    0.087    0.000    0.088    0.000 C:\Users\SIDDHESH\OneDrive\Documents\GitHub\SIH2026-187\backend\ai\events\behavior.py:67(_compute_displacement)
+  653/652    0.085    0.000   11.457    0.018 C:\Users\SIDDHESH\OneDrive\Documents\GitHub\SIH2026-187\backend\ai\tracking\tracker.py:107(track)
+      872    0.083    0.000    0.111    0.000 C:\Users\SIDDHESH\AppData\Roaming\Python\Python314\site-packages\ultralytics\utils\tal.py:439(dist2bbox)
+
+

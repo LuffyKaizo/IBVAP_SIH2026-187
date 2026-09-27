@@ -44,6 +44,37 @@ async def list_evidence(
     return {"evidence": items, "total": len(items)}
 
 
+@router.get("/set/{event_id}")
+async def get_evidence_set(
+    event_id: str,
+    _user: UserContext = Depends(require_permission(Permission.EVIDENCE_READ)),
+):
+    """Grouped evidence set for one event (spec PART 6).
+
+    Returns the three representations side by side — original (full context),
+    annotated (bbox + labels on the exact event frame) and target (focus crop)
+    — each keeping its own id, file path, SHA-256 and integrity status.
+    """
+    items = []
+    if _evidence_repo:
+        try:
+            items = await _evidence_repo.list_for_event(event_id)
+        except Exception:
+            items = []
+
+    def _newest(evidence_type: str):
+        matches = [i for i in items if i.get("evidenceType") == evidence_type]
+        return matches[0] if matches else None
+
+    return {
+        "eventId": event_id,
+        "original": _newest("SNAPSHOT"),
+        "annotated": _newest("ANNOTATED"),
+        "target": _newest("TARGET_CROP"),
+        "all": items,
+    }
+
+
 @router.get("/{evidence_id}")
 async def get_evidence(
     evidence_id: str,

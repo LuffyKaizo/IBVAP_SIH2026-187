@@ -1,0 +1,59 @@
+{
+  "tag": "exp-enc-ovl",
+  "timestamp_utc": "2026-09-27T00:31:10.025308+00:00",
+  "n_cameras": 1,
+  "duration_s": 30.0,
+  "settle_s": 10.0,
+  "register_s": 4.9,
+  "connect_wait_s": 0.5,
+  "ticks": 30,
+  "host": {
+    "cpu_pct_mean": 21.4,
+    "cpu_pct_max": 31.3,
+    "proc_cpu_pct_mean": 174.5,
+    "rss_mb_mean": 1860.3,
+    "rss_mb_max": 1868.8
+  },
+  "gpu": {
+    "util_pct_mean": 18.4,
+    "util_pct_max": 41.0,
+    "mem_used_mb_max": 1120.9
+  },
+  "cameras": [
+    {
+      "camera_id": "BENCH-01",
+      "slot": "1080p30",
+      "source_file": "pexels-george-morina-5293898 (1080p).mp4",
+      "source_fps": 29.97002997002997,
+      "target_fps": 29.97,
+      "resolution": "1920x1080",
+      "analytics_fps": 28.77,
+      "display_fps": 28.77,
+      "metadata_fps": 28.83,
+      "dropped_frames": 33,
+      "drop_per_s": 1.1,
+      "avg_latency_ms": 27.3,
+      "decode_ms": 4.13,
+      "stage_ms": {
+        "track": 14.34,
+        "events": 0.37,
+        "anpr": 4.7,
+        "publish": 1.64,
+        "loop_total": 25.52,
+        "face": 8.55
+      },
+      "ocr_dropped_jobs": 0
+    }
+  ],
+  "settings": {
+    "model_path": "C:\\Users\\SIDDHESH\\OneDrive\\Documents\\GitHub\\SIH2026-187\\models\\vehicle\\yolov8n.pt",
+    "device": "auto",
+    "anpr_enabled": true,
+    "face_detection_enabled": true,
+    "face_detection_interval": 2,
+    "inference_fps_fallback": 10,
+    "ocr_queue_size": 4,
+    "mjpeg_display_max_width": 1280,
+    "zone": "bottom-strip polygon (4 pts)"
+  }
+}
