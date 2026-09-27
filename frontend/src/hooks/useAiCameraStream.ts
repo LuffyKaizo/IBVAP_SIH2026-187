@@ -98,6 +98,10 @@ export function useAiCameraStream(): UseAiCameraStreamResult {
       };
 
       ws.onclose = () => {
+        // Guard against intentional close (cleanup/unmount): wsRef already
+        // nulled/replaced, so reconnecting would loop forever (see
+        // useCameraTileStream in CamerasMonitoringView.tsx).
+        if (wsRef.current !== ws) return;
         setIsConnected(false);
         setMetadata(null);
         if (statusTimerRef.current) { clearInterval(statusTimerRef.current); statusTimerRef.current = null; }
@@ -106,7 +110,7 @@ export function useAiCameraStream(): UseAiCameraStreamResult {
         }, 3000);
       };
 
-      ws.onerror = () => { setIsConnected(false); };
+      ws.onerror = () => { if (wsRef.current === ws) setIsConnected(false); };
     } catch {
       reconnectTimerRef.current = setTimeout(() => {
         if (reconnectFnRef.current) reconnectFnRef.current(cameraId, token);

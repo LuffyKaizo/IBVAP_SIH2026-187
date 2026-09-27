@@ -1,0 +1,227 @@
+{
+  "tag": "final-6cam",
+  "timestamp_utc": "2026-09-27T00:47:58.396607+00:00",
+  "n_cameras": 6,
+  "duration_s": 60.0,
+  "settle_s": 15.0,
+  "register_s": 32.3,
+  "connect_wait_s": 7.7,
+  "ticks": 59,
+  "host": {
+    "cpu_pct_mean": 98.7,
+    "cpu_pct_max": 100.0,
+    "proc_cpu_pct_mean": 1353.2,
+    "rss_mb_mean": 4054.4,
+    "rss_mb_max": 4153.8
+  },
+  "gpu": {
+    "util_pct_mean": 12.5,
+    "util_pct_max": 71.0,
+    "mem_used_mb_max": 3788.9
+  },
+  "cameras": [
+    {
+      "camera_id": "BENCH-01",
+      "slot": "1080p30",
+      "source_file": "pexels-george-morina-5293898 (1080p).mp4",
+      "source_fps": 29.97002997002997,
+      "target_fps": 29.97,
+      "resolution": "1920x1080",
+      "analytics_fps": 1.76,
+      "display_fps": 1.76,
+      "metadata_fps": 1.81,
+      "dropped_frames": 1642,
+      "drop_per_s": 27.83,
+      "avg_latency_ms": 564.7,
+      "decode_ms": 12.36,
+      "stage_ms": {
+        "track": 358.14,
+        "events": 10.01,
+        "anpr": 160.95,
+        "publish": 11.25,
+        "loop_total": 557.36,
+        "face": 26.18
+      },
+      "stage_p95_ms": {
+        "track": 484.1,
+        "events": 33.6,
+        "anpr": 755.6,
+        "publish": 26.4,
+        "loop_total": 1187.0,
+        "face": 159.3
+      },
+      "ocr_dropped_jobs": 0
+    },
+    {
+      "camera_id": "BENCH-02",
+      "slot": "1080p25",
+      "source_file": "pexels-taryn-elliott-5309381 (1080p).mp4",
+      "source_fps": 25.0,
+      "target_fps": 25.0,
+      "resolution": "1920x1080",
+      "analytics_fps": 2.19,
+      "display_fps": 2.19,
+      "metadata_fps": 2.24,
+      "dropped_frames": 1300,
+      "drop_per_s": 22.03,
+      "avg_latency_ms": 477.1,
+      "decode_ms": 13.53,
+      "stage_ms": {
+        "track": 294.34,
+        "events": 8.49,
+        "anpr": 105.89,
+        "publish": 10.49,
+        "loop_total": 467.26,
+        "face": 86.93
+      },
+      "stage_p95_ms": {
+        "track": 378.4,
+        "events": 22.1,
+        "anpr": 729.2,
+        "publish": 21.6,
+        "loop_total": 1011.3,
+        "face": 151.4
+      },
+      "ocr_dropped_jobs": 0
+    },
+    {
+      "camera_id": "BENCH-03",
+      "slot": "4k30",
+      "source_file": "Traffic Control CCTV.mp4",
+      "source_fps": 30.0,
+      "target_fps": 30.0,
+      "resolution": "3840x2160",
+      "analytics_fps": 0.63,
+      "display_fps": 0.63,
+      "metadata_fps": 0.63,
+      "dropped_frames": 1384,
+      "drop_per_s": 23.46,
+      "avg_latency_ms": 1410.3,
+      "decode_ms": 38.91,
+      "stage_ms": {
+        "track": 380.73,
+        "events": 29.8,
+        "anpr": 923.94,
+        "publish": 39.84,
+        "loop_total": 1426.36,
+        "face": 103.69
+      },
+      "stage_p95_ms": {
+        "track": 554.2,
+        "events": 80.8,
+        "anpr": 2034.6,
+        "publish": 79.1,
+        "loop_total": 2537.3,
+        "face": 226.8
+      },
+      "ocr_dropped_jobs": 2
+    },
+    {
+      "camera_id": "BENCH-04",
+      "slot": "4k30b",
+      "source_file": "pexels-george-morina-6719160 (2160p).mp4",
+      "source_fps": 29.97002997002997,
+      "target_fps": 29.97,
+      "resolution": "3840x2160",
+      "analytics_fps": 1.56,
+      "display_fps": 1.56,
+      "metadata_fps": 1.59,
+      "dropped_frames": 1239,
+      "drop_per_s": 21.0,
+      "avg_latency_ms": 656.2,
+      "decode_ms": 48.48,
+      "stage_ms": {
+        "track": 321.76,
+        "events": 12.2,
+        "anpr": 252.41,
+        "publish": 26.87,
+        "loop_total": 656.21,
+        "face": 80.46
+      },
+      "stage_p95_ms": {
+        "track": 441.7,
+        "events": 38.5,
+        "anpr": 885.0,
+        "publish": 43.3,
+        "loop_total": 1259.0,
+        "face": 134.3
+      },
+      "ocr_dropped_jobs": 0
+    },
+    {
+      "camera_id": "BENCH-05",
+      "slot": "720p30",
+      "source_file": "Automatic Number Plate Recognition (ANPR) _ Vehicle Number Plate Recognition (1).mp4",
+      "source_fps": 30.0,
+      "target_fps": 30.0,
+      "resolution": "1280x720",
+      "analytics_fps": 1.73,
+      "display_fps": 1.73,
+      "metadata_fps": 1.75,
+      "dropped_frames": 1735,
+      "drop_per_s": 29.41,
+      "avg_latency_ms": 615.6,
+      "decode_ms": 8.01,
+      "stage_ms": {
+        "track": 340.32,
+        "events": 8.8,
+        "anpr": 190.3,
+        "publish": 8.36,
+        "loop_total": 605.62,
+        "face": 106.48
+      },
+      "stage_p95_ms": {
+        "track": 549.6,
+        "events": 26.8,
+        "anpr": 1656.7,
+        "publish": 18.3,
+        "loop_total": 2206.2,
+        "face": 181.9
+      },
+      "ocr_dropped_jobs": 0
+    },
+    {
+      "camera_id": "BENCH-06",
+      "slot": "1080p30b",
+      "source_file": "cam-01.mp4",
+      "source_fps": 29.97002997002997,
+      "target_fps": 29.97,
+      "resolution": "1920x1080",
+      "analytics_fps": 2.9,
+      "display_fps": 2.9,
+      "metadata_fps": 2.97,
+      "dropped_frames": 1591,
+      "drop_per_s": 26.97,
+      "avg_latency_ms": 360.2,
+      "decode_ms": 12.38,
+      "stage_ms": {
+        "track": 299.61,
+        "events": 1.25,
+        "anpr": 0.29,
+        "publish": 7.84,
+        "loop_total": 350.89,
+        "face": 80.65
+      },
+      "stage_p95_ms": {
+        "track": 378.4,
+        "events": 7.9,
+        "anpr": 3.0,
+        "publish": 21.5,
+        "loop_total": 478.7,
+        "face": 147.1
+      },
+      "ocr_dropped_jobs": 0
+    }
+  ],
+  "settings": {
+    "model_path": "C:\\Users\\SIDDHESH\\OneDrive\\Documents\\GitHub\\SIH2026-187\\models\\vehicle\\yolov8n.pt",
+    "device": "auto",
+    "anpr_enabled": true,
+    "face_detection_enabled": true,
+    "face_detection_interval": 2,
+    "inference_fps_fallback": 10,
+    "ocr_queue_size": 4,
+    "mjpeg_display_max_width": 1280,
+    "zone": "bottom-strip polygon (4 pts)"
+  }
+}

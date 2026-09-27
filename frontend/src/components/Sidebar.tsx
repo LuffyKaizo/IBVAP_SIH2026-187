@@ -6,6 +6,7 @@ export type NavPath =
   | 'ai-analytics'
   | 'anpr'
   | 'event-intelligence'
+  | 'tactical-map'
   | 'analytics'
   | 'reports'
   | 'settings';
@@ -48,6 +49,7 @@ const NAV_GROUPS: NavGroupData[] = [
       { path: 'anpr', label: 'ANPR', icon: 'directions_car' },
       { path: 'analytics', label: 'Analytics', icon: 'monitoring' },
       { path: 'ai-analytics', label: 'AI Analytics', icon: 'neurology' },
+      { path: 'tactical-map', label: 'Tactical Map', icon: 'map' },
     ],
   },
   {

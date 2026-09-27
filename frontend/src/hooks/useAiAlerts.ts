@@ -48,6 +48,13 @@ export function useAiAlerts() {
           fenceProximity: aiAlert.fenceProximity,
           direction: aiAlert.direction,
           repeatedEntry: aiAlert.repeatedEntry,
+          eventId: aiAlert.eventId,
+          bbox: aiAlert.bbox,
+          frameWidth: aiAlert.frameWidth,
+          frameHeight: aiAlert.frameHeight,
+          objectClass: aiAlert.objectClass,
+          sourceFps: aiAlert.sourceFps,
+          processingFps: aiAlert.processingFps,
         };
       }
 

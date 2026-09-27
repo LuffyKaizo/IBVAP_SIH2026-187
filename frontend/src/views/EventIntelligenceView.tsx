@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { BorderAlert, SuspiciousEventItem } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import EvidenceViewer, { EvidenceArtifactRow, EvidenceSetState, EvidenceSlot } from '../components/EvidenceViewer';
 
 const AI_SERVICE_URL = (import.meta.env.VITE_AI_SERVICE_URL || 'http://localhost:8000');
 
@@ -85,11 +86,8 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
   const [activeTab, setActiveTab] = useState<'INCIDENTS' | 'RULES' | 'NIGHT_CURFEW'>('INCIDENTS');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [sirenActive, setSirenActive] = useState(false);
-  const [evidence, setEvidence] = useState<{
-    state: 'LOADING' | 'READY' | 'UNAVAILABLE';
-    url: string | null;
-    kind: 'TARGET_CROP' | 'SNAPSHOT' | null;
-  }>({ state: 'LOADING', url: null, kind: null });
+  const [evidenceSet, setEvidenceSet] = useState<EvidenceSetState>({ state: 'LOADING' });
+  const [flashId, setFlashId] = useState<string | null>(null);
 
   const { getAuthHeaders } = useAuth();
   const sirenAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -106,70 +104,104 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
   const activeAlertId = activeAlert?.id;
   const activeSnapshotUrl = activeAlert?.snapshotUrl;
 
-  // Resolve the evidence snapshot for the selected incident through the existing
-  // GET /evidence (event_id filter) + GET /evidence/{id}/file APIs.
+  // Load the full 3-artifact evidence set (original / annotated / target)
+  // for the selected incident through GET /evidence/set/{eventId} — with a
+  // fallback to the legacy list endpoint, then fetch each artifact's file.
   useEffect(() => {
     let cancelled = false;
-    let createdUrl: string | null = null;
-    setEvidence({ state: 'LOADING', url: null, kind: null });
+    const createdUrls: string[] = [];
+    setEvidenceSet({ state: 'LOADING' });
+
+    const fetchRow = async (row: EvidenceArtifactRow): Promise<EvidenceSlot | null> => {
+      if (!row?.id) return null;
+      const res = await fetch(`${AI_SERVICE_URL}/evidence/${encodeURIComponent(row.id)}/file`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      createdUrls.push(url);
+      return { row, url };
+    };
 
     const load = async () => {
       try {
         if (!activeAlertId) {
-          setEvidence({ state: 'UNAVAILABLE', url: null, kind: null });
+          setEvidenceSet({ state: 'UNAVAILABLE' });
           return;
         }
         if (activeSnapshotUrl) {
-          // Alerts that already carry a snapshot URL (system/mock sources) use it directly.
-          setEvidence({ state: 'READY', url: activeSnapshotUrl, kind: null });
+          // System/mock alerts carry a direct snapshot URL — single artifact.
+          setEvidenceSet({ state: 'READY', original: { row: null, url: activeSnapshotUrl } });
           return;
         }
         const eventId = eventIdFromAlertId(activeAlertId);
         if (!eventId) {
-          setEvidence({ state: 'UNAVAILABLE', url: null, kind: null });
+          setEvidenceSet({ state: 'UNAVAILABLE' });
           return;
         }
         const headers = getAuthHeaders();
-        const listRes = await fetch(
-          `${AI_SERVICE_URL}/evidence?event_id=${encodeURIComponent(eventId)}&limit=5`,
-          { headers },
-        );
-        if (!listRes.ok) throw new Error(`evidence list ${listRes.status}`);
-        const list = await listRes.json();
-        // Primary evidence is the annotated TARGET_CROP (red box + labels are
-        // baked into the pixels); fall back to the full-scene snapshot.
-        const items: { id?: string; evidenceType?: string }[] = list?.evidence || [];
-        const chosen = items.find((e) => e.evidenceType === 'TARGET_CROP') || items[0];
-        const evidenceId: string | undefined = chosen?.id;
-        if (!evidenceId) {
-          if (!cancelled) setEvidence({ state: 'UNAVAILABLE', url: null, kind: null });
+
+        let rows: EvidenceArtifactRow[] = [];
+        try {
+          const setRes = await fetch(
+            `${AI_SERVICE_URL}/evidence/set/${encodeURIComponent(eventId)}`,
+            { headers },
+          );
+          if (setRes.ok) {
+            const data = await setRes.json();
+            rows = [data.original, data.annotated, data.target].filter(Boolean);
+          }
+        } catch {
+          /* fall through to legacy list */
+        }
+        if (rows.length === 0) {
+          const listRes = await fetch(
+            `${AI_SERVICE_URL}/evidence?event_id=${encodeURIComponent(eventId)}&limit=5`,
+            { headers },
+          );
+          if (!listRes.ok) throw new Error(`evidence list ${listRes.status}`);
+          const list = await listRes.json();
+          rows = (list?.evidence || []).filter((e: EvidenceArtifactRow) => e?.id);
+        }
+
+        const slots = await Promise.all(rows.map(fetchRow));
+        if (cancelled) return;
+        const valid = slots.filter(Boolean) as EvidenceSlot[];
+        if (valid.length === 0) {
+          setEvidenceSet({ state: 'UNAVAILABLE' });
           return;
         }
-        const fileRes = await fetch(
-          `${AI_SERVICE_URL}/evidence/${encodeURIComponent(evidenceId)}/file`,
-          { headers },
-        );
-        if (!fileRes.ok) throw new Error(`evidence file ${fileRes.status}`);
-        const blob = await fileRes.blob();
-        createdUrl = URL.createObjectURL(blob);
-        if (!cancelled) {
-          setEvidence({
-            state: 'READY',
-            url: createdUrl,
-            kind: chosen?.evidenceType === 'TARGET_CROP' ? 'TARGET_CROP' : 'SNAPSHOT',
-          });
-        }
+        const find = (type: string) =>
+          valid.find((s) => s.row?.evidenceType === type) || null;
+        setEvidenceSet({
+          state: 'READY',
+          original: find('SNAPSHOT'),
+          annotated: find('ANNOTATED'),
+          target: find('TARGET_CROP'),
+        });
       } catch {
-        if (!cancelled) setEvidence({ state: 'UNAVAILABLE', url: null, kind: null });
+        if (!cancelled) setEvidenceSet({ state: 'UNAVAILABLE' });
       }
     };
 
     void load();
     return () => {
       cancelled = true;
-      if (createdUrl) URL.revokeObjectURL(createdUrl);
+      for (const url of createdUrls) URL.revokeObjectURL(url);
     };
   }, [activeAlertId, activeSnapshotUrl, getAuthHeaders]);
+
+  // Alert-click focus: scroll the selected alert card into view and flash it
+  // (selectedAlertId can be set from anywhere via handleSelectAlert).
+  useEffect(() => {
+    if (!selectedAlertId) return;
+    const el = document.getElementById(`alert-card-${selectedAlertId}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    setFlashId(selectedAlertId);
+    const t = window.setTimeout(() => setFlashId(null), 1400);
+    return () => window.clearTimeout(t);
+  }, [selectedAlertId]);
 
   const stopSiren = () => {
     const audio = sirenAudioRef.current;
@@ -225,6 +257,30 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
     setActionNotice(`Patrol dispatched to ${activeAlert.cameraName}`);
     setTimeout(() => setActionNotice(null), 3500);
     playDispatchChime();
+  };
+
+  // Open the print-ready incident report (HTML with embedded evidence +
+  // SHA-256). Fetched with auth headers, then opened as a blob URL so no
+  // credentials leak into the URL.
+  const handleOpenReport = async () => {
+    try {
+      const eventId = activeAlert ? eventIdFromAlertId(activeAlert.id) : null;
+      if (!eventId) return;
+      const res = await fetch(
+        `${AI_SERVICE_URL}/reports/incidents/${encodeURIComponent(eventId)}`,
+        { headers: getAuthHeaders() },
+      );
+      if (!res.ok) throw new Error(`report ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setActionNotice('Incident report opened');
+      setTimeout(() => setActionNotice(null), 3500);
+    } catch {
+      setActionNotice('Report unavailable for this incident');
+      setTimeout(() => setActionNotice(null), 3500);
+    }
   };
 
   const handleToggleSiren = () => {
@@ -319,12 +375,16 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
                 return (
                   <button
                     key={alert.id}
+                    id={`alert-card-${alert.id}`}
+                    data-testid={`alert-card-${alert.id}`}
                     onClick={() => onSelectAlert(alert.id)}
                     className={`w-full p-3 rounded-xl border-l-4 transition-all cursor-pointer text-left flex flex-col gap-1.5 ${
                       isSelected
                         ? 'bg-primary/10 border-primary shadow-sm'
                         : 'bg-surface hover:bg-surface-container-low border-outline-variant/60'
-                    } ${isCrit ? 'border-l-error' : isMed ? 'border-l-warning' : 'border-l-outline'} border border-outline-variant/50`}
+                    } ${flashId === alert.id ? 'ring-2 ring-primary ring-offset-1 ring-offset-surface' : ''} ${
+                      isCrit ? 'border-l-error' : isMed ? 'border-l-warning' : 'border-l-outline'
+                    } border border-outline-variant/50`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -396,6 +456,18 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
                         <span className="block text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Detected At</span>
                         <span className="font-mono text-on-surface">{activeAlert.timestamp}</span>
                       </div>
+                      <div>
+                        <span className="block text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Object Type</span>
+                        <span className="font-semibold text-on-surface capitalize" data-testid="alert-object-class">
+                          {activeAlert.objectClass || (activeAlert.bbox ? 'Tracked target' : '—')}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">FPS (source / analysis)</span>
+                        <span className="font-mono text-on-surface">
+                          {activeAlert.sourceFps ?? '—'} / {activeAlert.processingFps ?? '—'}
+                        </span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-4 mt-2.5 pt-2.5 border-t border-outline-variant/40 text-[10px] text-on-surface-variant">
                       <span className="flex items-center gap-1">
@@ -426,6 +498,13 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
                       <span className="material-symbols-outlined text-[14px]">local_police</span> Dispatch Patrol
                     </button>
                     <button
+                      onClick={() => void handleOpenReport()}
+                      data-testid="open-incident-report"
+                      className="px-3 py-1.5 bg-surface hover:bg-surface-container-high border border-outline-variant rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer text-on-surface"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">description</span> Incident Report
+                    </button>
+                    <button
                       onClick={handleToggleSiren}
                       aria-pressed={sirenActive}
                       className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
@@ -445,42 +524,58 @@ export const EventIntelligenceView: React.FC<EventIntelligenceViewProps> = ({
                     )}
                   </div>
 
-                  {/* Snapshot */}
-                  <div className="relative w-full aspect-video bg-surface-container-low rounded-lg overflow-hidden border border-outline-variant mb-4 select-none">
-                    {evidence.state === 'READY' && evidence.url ? (
-                      <>
-                        <img
-                          src={evidence.url}
-                          alt={evidence.kind === 'TARGET_CROP' ? 'Target crop evidence' : 'Incident snapshot'}
-                          className="w-full h-full object-cover opacity-90"
-                          onError={() => setEvidence({ state: 'UNAVAILABLE', url: null, kind: null })}
-                        />
-                        {/* No fake CSS bounding box — the red box + labels are
-                            baked into TARGET_CROP images by the AI pipeline. */}
-                        <div className="absolute bottom-2 left-2 flex items-center gap-1.5">
-                          {evidence.kind === 'TARGET_CROP' && (
-                            <span className="bg-error px-2 py-0.5 rounded text-[9px] font-mono font-bold text-on-error" data-testid="evidence-target-crop-badge">
-                              TARGET CROP
-                            </span>
-                          )}
-                          <span className="bg-on-surface/80 px-2 py-0.5 rounded text-[10px] text-surface font-mono">
-                            {activeAlert.cameraName} · {activeAlert.timestamp}
+                  {/* Evidence viewer: original / target / annotated / perspective */}
+                  <EvidenceViewer
+                    set={evidenceSet}
+                    bbox={activeAlert.bbox}
+                    frameWidth={activeAlert.frameWidth}
+                    frameHeight={activeAlert.frameHeight}
+                    cameraName={activeAlert.cameraName}
+                    timestamp={activeAlert.timestamp}
+                  />
+
+                  {/* Chain of custody (primary artifact: target > annotated > original) */}
+                  {(() => {
+                    const primary =
+                      evidenceSet.target?.row || evidenceSet.annotated?.row || evidenceSet.original?.row;
+                    if (!primary) return null;
+                    return (
+                      <div
+                        className="bg-surface-container-low rounded-lg px-3 py-2 mb-4 border border-outline-variant flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[10px]"
+                        data-testid="evidence-chain-of-custody"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Integrity</span>
+                          <span
+                            className={`font-bold px-1.5 py-0.5 rounded ${
+                              primary.integrityStatus === 'VALID'
+                                ? 'bg-success-container text-success'
+                                : 'bg-error-container text-on-error-container'
+                            }`}
+                          >
+                            {primary.integrityStatus || 'UNKNOWN'}
                           </span>
-                        </div>
-                      </>
-                    ) : evidence.state === 'LOADING' ? (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-on-surface-variant">
-                        <span className="material-symbols-outlined text-[28px] animate-spin">progress_activity</span>
-                        <span className="text-[11px]">Loading evidence snapshot…</span>
+                        </span>
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider shrink-0">SHA-256</span>
+                          <span
+                            className="font-mono text-on-surface truncate"
+                            title={primary.sha256Hash || ''}
+                            data-testid="evidence-sha256"
+                          >
+                            {primary.sha256Hash ? `${primary.sha256Hash.slice(0, 24)}…` : '—'}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-[9px] font-semibold text-on-surface-variant uppercase tracking-wider">Artifacts</span>
+                          <span className="font-mono text-on-surface">
+                            {[evidenceSet.original, evidenceSet.annotated, evidenceSet.target]
+                              .filter(Boolean).length}/3
+                          </span>
+                        </span>
                       </div>
-                    ) : (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-on-surface-variant px-4 text-center">
-                        <span className="material-symbols-outlined text-[32px] opacity-60">image_not_supported</span>
-                        <span className="text-[11px] font-bold uppercase tracking-wider">No evidence snapshot captured</span>
-                        <span className="text-[10px] font-mono">{activeAlert.cameraName} · {activeAlert.timestamp}</span>
-                      </div>
-                    )}
-                  </div>
+                    );
+                  })()}
 
                   {/* Reason */}
                   <div className="bg-surface-container-low rounded-lg p-3.5 border border-outline-variant mb-3 text-[11px]">

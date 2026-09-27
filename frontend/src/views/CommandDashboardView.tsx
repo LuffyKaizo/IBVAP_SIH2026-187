@@ -4,6 +4,7 @@ import { CameraFeed, BorderAlert, DashboardKpiStats, VirtualZone } from '../type
 import { NavPath } from '../components/Sidebar';
 import { useAuth } from '../contexts/AuthContext';
 import { ZonePolygons } from '../components/IntrusionZoneLayer';
+import { streamBaseUrl } from '../lib/streamUrl';
 
 interface CommandDashboardViewProps {
   stats: DashboardKpiStats;
@@ -248,7 +249,7 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
                   <div className="relative w-full aspect-video bg-surface-container-low overflow-hidden">
                     {camera.id && authToken ? (
                       <img
-                        src={AI_BASE + '/video/stream/' + camera.id + '?token=' + authToken}
+                        src={streamBaseUrl(AI_BASE, camera.id) + '/video/stream/' + camera.id + '?token=' + authToken}
                         alt={camera.name}
                         className="w-full h-full object-cover opacity-90 group-hover:scale-[1.02] transition-transform duration-500"
                       />

@@ -1,0 +1,107 @@
+{
+  "tag": "fixed-3cam",
+  "timestamp_utc": "2026-09-27T00:34:05.542351+00:00",
+  "n_cameras": 3,
+  "duration_s": 60.0,
+  "settle_s": 15.0,
+  "register_s": 8.9,
+  "connect_wait_s": 3.5,
+  "ticks": 60,
+  "host": {
+    "cpu_pct_mean": 55.1,
+    "cpu_pct_max": 66.5,
+    "proc_cpu_pct_mean": 657.0,
+    "rss_mb_mean": 2939.3,
+    "rss_mb_max": 3042.4
+  },
+  "gpu": {
+    "util_pct_mean": 35.4,
+    "util_pct_max": 79.0,
+    "mem_used_mb_max": 3660.9
+  },
+  "cameras": [
+    {
+      "camera_id": "BENCH-01",
+      "slot": "1080p30",
+      "source_file": "pexels-george-morina-5293898 (1080p).mp4",
+      "source_fps": 29.97002997002997,
+      "target_fps": 29.97,
+      "resolution": "1920x1080",
+      "analytics_fps": 11.17,
+      "display_fps": 11.17,
+      "metadata_fps": 11.22,
+      "dropped_frames": 1124,
+      "drop_per_s": 18.73,
+      "avg_latency_ms": 103.9,
+      "decode_ms": 4.82,
+      "stage_ms": {
+        "track": 60.34,
+        "events": 1.16,
+        "anpr": 18.82,
+        "publish": 2.54,
+        "loop_total": 89.19,
+        "face": 12.45
+      },
+      "ocr_dropped_jobs": 0
+    },
+    {
+      "camera_id": "BENCH-02",
+      "slot": "1080p25",
+      "source_file": "pexels-taryn-elliott-5309381 (1080p).mp4",
+      "source_fps": 25.0,
+      "target_fps": 25.0,
+      "resolution": "1920x1080",
+      "analytics_fps": 10.83,
+      "display_fps": 10.83,
+      "metadata_fps": 10.88,
+      "dropped_frames": 846,
+      "drop_per_s": 14.1,
+      "avg_latency_ms": 109.8,
+      "decode_ms": 6.07,
+      "stage_ms": {
+        "track": 57.02,
+        "events": 1.08,
+        "anpr": 19.58,
+        "publish": 2.57,
+        "loop_total": 92.45,
+        "face": 23.66
+      },
+      "ocr_dropped_jobs": 0
+    },
+    {
+      "camera_id": "BENCH-03",
+      "slot": "4k30",
+      "source_file": "Traffic Control CCTV.mp4",
+      "source_fps": 30.0,
+      "target_fps": 30.0,
+      "resolution": "3840x2160",
+      "analytics_fps": 4.28,
+      "display_fps": 4.28,
+      "metadata_fps": 4.3,
+      "dropped_frames": 1539,
+      "drop_per_s": 25.65,
+      "avg_latency_ms": 241.5,
+      "decode_ms": 16.6,
+      "stage_ms": {
+        "track": 69.08,
+        "events": 2.85,
+        "anpr": 136.34,
+        "publish": 9.67,
+        "loop_total": 232.47,
+        "face": 28.36
+      },
+      "ocr_dropped_jobs": 0
+    }
+  ],
+  "settings": {
+    "model_path": "C:\\Users\\SIDDHESH\\OneDrive\\Documents\\GitHub\\SIH2026-187\\models\\vehicle\\yolov8n.pt",
+    "device": "auto",
+    "anpr_enabled": true,
+    "face_detection_enabled": true,
+    "face_detection_interval": 2,
+    "inference_fps_fallback": 10,
+    "ocr_queue_size": 4,
+    "mjpeg_display_max_width": 1280,
+    "zone": "bottom-strip polygon (4 pts)"
+  }
+}

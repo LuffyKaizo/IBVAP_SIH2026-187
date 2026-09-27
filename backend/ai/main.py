@@ -33,6 +33,8 @@ from ai.db.repositories import (
 from ai.evidence.store import LocalFileEvidenceStore
 from ai.evidence.capture import EvidenceCapture
 from ai.evidence.routes import router as evidence_router, init_evidence_routes
+from ai.reports.routes import router as reports_router, init_report_routes
+from ai.tactical.routes import router as tactical_router, init_tactical_routes
 from ai.sync.client import CentralSyncClient
 from ai.sync.manager import SyncManager
 from ai.sync.routes import router as sync_router, init_sync_routes
@@ -194,6 +196,23 @@ async def lifespan(app):
         _evidence_capture,
         _blockchain_service,
     )
+    init_report_routes(
+        _event_repo if db_ok else None,
+        _alert_repo if db_ok else None,
+        _evidence_repo if db_ok else None,
+        _evidence_store,
+    )
+    # Tactical geospatial layer (PART 10): idempotent runtime schema —
+    # no auto-migration and no create_all (alembic 008 is schema-as-code).
+    _tactical_repo = None
+    if db_ok:
+        from ai.tactical.repository import TacticalRepository
+        _tactical_repo = TacticalRepository()
+        if await _tactical_repo.ensure_schema():
+            print("[STARTUP] Tactical geospatial tables ready")
+        else:
+            print("[STARTUP] WARNING: tactical schema creation failed")
+    init_tactical_routes(_tactical_repo, _camera_repo if db_ok else None)
     print("[STARTUP] Evidence subsystem initialized (dir=%s)" % _evidence_store._base_dir)
 
     # Sync subsystem (store-and-forward to central server)
@@ -347,6 +366,8 @@ app.include_router(auth_router)
 
 # Evidence routes
 app.include_router(evidence_router)
+app.include_router(reports_router)
+app.include_router(tactical_router)
 
 # Sync routes
 app.include_router(sync_router)
