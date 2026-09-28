@@ -26,14 +26,17 @@ interface ContextMenuState {
   y: number;
 }
 
-interface CameraTileState {
+export interface CameraTileState {
   metadata: AiTrackingMetadata | null;
   status: AiCameraStatus | null;
   isConnected: boolean;
   aiEnabled: boolean;
 }
 
-function useCameraTileStream(cameraId: string, token: string | null) {
+// Shared live-analysis hook (WebSocket /ws/cameras/{id} + /status polling).
+// Used by BOTH the individual Camera view and the Command Dashboard tiles so
+// both render the exact same detection state for the same camera.
+export function useCameraTileStream(cameraId: string, token: string | null) {
   const AI_BASE = (import.meta.env.VITE_AI_SERVICE_URL || 'http://localhost:8000');
   const [state, setState] = useState<CameraTileState>({
     metadata: null, status: null, isConnected: false, aiEnabled: true,

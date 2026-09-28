@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { CameraFeed, BorderAlert, DashboardKpiStats, VirtualZone } from '../types';
+import { CameraFeed, BorderAlert, DashboardKpiStats, VirtualZone, AiTrackedObject } from '../types';
 import { NavPath } from '../components/Sidebar';
 import { useAuth } from '../contexts/AuthContext';
 import { ZonePolygons } from '../components/IntrusionZoneLayer';
+import { AIBoundingBoxOverlay } from '../components/AIBoundingBoxOverlay';
+import { AIFaceOverlay } from '../components/AIFaceOverlay';
+import { useCameraTileStream } from './CamerasMonitoringView';
 import { streamBaseUrl } from '../lib/streamUrl';
 
 interface CommandDashboardViewProps {
@@ -18,6 +21,134 @@ interface CommandDashboardViewProps {
   onDeleteCamera?: (cameraId: string) => void;
 }
 
+// ─── Dashboard camera tile ──────────────────────────────────────────────────
+// Renders the SAME live analysis as the individual Camera view: it consumes
+// the existing useCameraTileStream hook (per-camera WebSocket
+// /ws/cameras/{id} + /status) and the existing overlay components
+// (AIBoundingBoxOverlay / AIFaceOverlay). State is mapped by camera ID,
+// never by array index, and the MJPEG video preview is unchanged.
+interface DashboardCameraTileProps {
+  camera: CameraFeed;
+  token: string | null;
+  zones: VirtualZone[];
+  onOpen: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+  onDetectionsChange: (cameraId: string, detections: AiTrackedObject[]) => void;
+}
+
+const DashboardCameraTile: React.FC<DashboardCameraTileProps> = ({
+  camera,
+  token,
+  zones,
+  onOpen,
+  onContextMenu,
+  onDetectionsChange,
+}) => {
+  const AI_BASE = (import.meta.env.VITE_AI_SERVICE_URL || 'http://localhost:8000');
+  const stream = useCameraTileStream(camera.id, token);
+  const isRealAi = stream.metadata?.ai_enabled !== undefined
+    ? stream.metadata.ai_enabled && stream.isConnected
+    : stream.isConnected;
+  const detections = stream.metadata?.detections || [];
+  const faces = stream.metadata?.faces || [];
+  const trackContext = stream.metadata?.track_context || [];
+  const events = stream.metadata?.events || [];
+  const cameraZones = zones.filter((z) => z.cameraId === camera.id);
+  // Same intrusion rule the existing AIBoundingBoxOverlay applies for its
+  // red highlighting, so the badge/edge stay consistent with the Camera view.
+  const hasThreat = events.some(
+    (ev) =>
+      (ev.event_type === 'PERSON_INTRUSION' || ev.event_type === 'VEHICLE_INTRUSION') &&
+      ev.status !== 'RESOLVED',
+  );
+
+  // Publish this camera's current live detections to the dashboard KPI,
+  // keyed by the real camera ID.
+  useEffect(() => {
+    onDetectionsChange(camera.id, stream.metadata?.detections || []);
+  }, [stream.metadata, camera.id, onDetectionsChange]);
+
+  return (
+    <button
+      onClick={onOpen}
+      onContextMenu={onContextMenu}
+      className={`bg-surface rounded-xl border overflow-hidden transition-all cursor-pointer text-left group hover:shadow-md ${
+        hasThreat ? 'border-error/30 hover:border-error/50' : 'border-outline-variant hover:border-primary/30'
+      }`}
+    >
+      {/* Camera Card Header */}
+      <div className="h-8 bg-surface-container-low px-3 flex items-center justify-between border-b border-outline-variant/50">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-bold text-primary font-mono">{camera.id}</span>
+          <span className="text-[10px] text-on-surface-variant truncate">· {camera.location}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className={`w-1.5 h-1.5 rounded-full ${camera.sourceType === 'video' ? 'bg-warning' : 'bg-success'}`} />
+          <span className={`text-[9px] font-bold ${camera.sourceType === 'video' ? 'text-warning' : 'text-success'}`}>
+            {camera.sourceType === 'video' ? 'VIDEO' : 'LIVE'}
+          </span>
+        </div>
+      </div>
+
+      {/* Video Preview — uses the same MJPEG stream as the individual camera view */}
+      <div className="relative w-full aspect-video bg-surface-container-low overflow-hidden">
+        {camera.id && token ? (
+          <img
+            src={streamBaseUrl(AI_BASE, camera.id) + '/video/stream/' + camera.id + '?token=' + token}
+            alt={camera.name}
+            className="w-full h-full object-cover opacity-90 group-hover:scale-[1.02] transition-transform duration-500"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-surface-container text-on-surface-variant text-xs">No preview</div>
+        )}
+
+        {/* Intrusion zone outlines (display-only) */}
+        {cameraZones.length > 0 && <ZonePolygons zones={cameraZones} />}
+
+        {/* Live AI analysis — same overlay components and state as the Camera view */}
+        {isRealAi && (
+          <AIBoundingBoxOverlay detections={detections} trackContext={trackContext} events={events} />
+        )}
+        {isRealAi && (
+          <AIFaceOverlay faces={faces} />
+        )}
+
+        {/* Threat overlay */}
+        {hasThreat && (
+          <div className="absolute top-2 right-2 px-2 py-1 bg-error/90 text-on-error rounded-md text-[10px] font-bold flex items-center gap-1">
+            <span className="material-symbols-outlined text-[12px]">warning</span>
+            INTRUSION
+          </div>
+        )}
+
+        {/* Camera name */}
+        <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-on-surface/70 text-surface text-[10px] rounded font-medium">
+          {camera.name}
+        </div>
+      </div>
+
+      {/* Card Footer — driven by the actual current analysis state */}
+      <div className="px-3 py-2 flex items-center justify-between border-t border-outline-variant/30">
+        <div className="text-[11px] text-on-surface-variant">
+          {detections.length > 0 ? (
+            <span>
+              Targets:{' '}
+              <span className="text-on-surface font-semibold">
+                {detections.map((d) => `#${d.track_id}`).join(', ')}
+              </span>
+            </span>
+          ) : (
+            <span>No Active Targets</span>
+          )}
+        </div>
+        <span className="text-[11px] text-primary font-semibold group-hover:underline flex items-center gap-0.5">
+          Inspect <span className="material-symbols-outlined text-[12px]">chevron_right</span>
+        </span>
+      </div>
+    </button>
+  );
+};
+
 export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
   stats,
   cameras,
@@ -30,8 +161,33 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
   onDeleteCamera,
 }) => {
   const { getAuthHeaders } = useAuth();
-  const AI_BASE = (import.meta.env.VITE_AI_SERVICE_URL || 'http://localhost:8000');
   const authToken = getAuthHeaders()['Authorization']?.replace('Bearer ', '') || '';
+
+  // Live AI analysis state, reported by each camera tile below. Tiles share
+  // the individual Camera view's analysis source (useCameraTileStream) and
+  // are keyed by the actual camera ID — no second pipeline, no extra
+  // inference, no additional polling.
+  const [liveDetections, setLiveDetections] = useState<Record<string, AiTrackedObject[]>>({});
+  const handleTileDetections = useCallback((cameraId: string, detections: AiTrackedObject[]) => {
+    setLiveDetections((prev) => (prev[cameraId] === detections ? prev : { ...prev, [cameraId]: detections }));
+  }, []);
+
+  // People / Vehicles KPI: counted from the CURRENT live detections of every
+  // camera (the same state the Camera monitoring page displays), never from
+  // database history or total historical detections.
+  const liveCounts = useMemo(() => {
+    let people = 0;
+    let vehicles = 0;
+    for (const camera of cameras) {
+      const dets = liveDetections[camera.id];
+      if (!dets) continue;
+      for (const det of dets) {
+        if (det.class_name === 'person') people += 1;
+        else if (['car', 'truck', 'bus', 'motorcycle'].includes(det.class_name)) vehicles += 1;
+      }
+    }
+    return { people, vehicles };
+  }, [cameras, liveDetections]);
 
   const [acknowledgedAlerts, setAcknowledgedAlerts] = useState<Record<string, boolean>>({});
 
@@ -174,7 +330,7 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
             <span className="material-symbols-outlined text-primary text-[20px]">groups</span>
           </div>
           <div className="text-2xl font-bold text-on-surface">
-            {stats.peopleDetected} <span className="text-base text-on-surface-variant font-normal">/ {stats.vehiclesDetected}</span>
+            {liveCounts.people} <span className="text-base text-on-surface-variant font-normal">/ {liveCounts.vehicles}</span>
           </div>
           <div className="mt-2">
             <span className="text-[11px] text-on-surface-variant">Tracked across all sectors</span>
@@ -216,117 +372,20 @@ export const CommandDashboardView: React.FC<CommandDashboardViewProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {cameras.map((camera) => {
-              const hasThreat = camera.detections.some((d) => d.isThreat);
-              const cameraZones = zones.filter((z) => z.cameraId === camera.id);
-              return (
-                <button
-                  key={camera.id}
-                  onClick={() => {
-                    onSelectCamera?.(camera.id);
-                    onNavigate('cameras');
-                  }}
-                  onContextMenu={(e) => handleContextMenu(camera.id, e)}
-                  className={`bg-surface rounded-xl border overflow-hidden transition-all cursor-pointer text-left group hover:shadow-md ${
-                    hasThreat ? 'border-error/30 hover:border-error/50' : 'border-outline-variant hover:border-primary/30'
-                  }`}
-                >
-                  {/* Camera Card Header */}
-                  <div className="h-8 bg-surface-container-low px-3 flex items-center justify-between border-b border-outline-variant/50">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-bold text-primary font-mono">{camera.id}</span>
-                      <span className="text-[10px] text-on-surface-variant truncate">· {camera.location}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className={`w-1.5 h-1.5 rounded-full ${camera.sourceType === 'video' ? 'bg-warning' : 'bg-success'}`} />
-                      <span className={`text-[9px] font-bold ${camera.sourceType === 'video' ? 'text-warning' : 'text-success'}`}>
-                        {camera.sourceType === 'video' ? 'VIDEO' : 'LIVE'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Video Preview — uses the same MJPEG stream as the individual camera view */}
-                  <div className="relative w-full aspect-video bg-surface-container-low overflow-hidden">
-                    {camera.id && authToken ? (
-                      <img
-                        src={streamBaseUrl(AI_BASE, camera.id) + '/video/stream/' + camera.id + '?token=' + authToken}
-                        alt={camera.name}
-                        className="w-full h-full object-cover opacity-90 group-hover:scale-[1.02] transition-transform duration-500"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-surface-container text-on-surface-variant text-xs">No preview</div>
-                    )}
-
-                    {/* Intrusion zone outlines (display-only) */}
-                    {cameraZones.length > 0 && <ZonePolygons zones={cameraZones} />}
-
-                    {/* Bounding boxes */}
-                    {camera.detections.map((det) => (
-                      <div
-                        key={det.id}
-                        className={`absolute border-2 ${
-                          det.isThreat
-                            ? 'border-error'
-                            : det.classType === 'vehicle'
-                            ? 'border-tertiary'
-                            : 'border-secondary'
-                        }`}
-                        style={{
-                          left: `${det.bbox.x}%`,
-                          top: `${det.bbox.y}%`,
-                          width: `${det.bbox.w}%`,
-                          height: `${det.bbox.h}%`,
-                        }}
-                      >
-                        <div
-                          className={`absolute -top-[18px] left-0 px-1.5 py-[2px] text-[9px] font-mono font-bold whitespace-nowrap rounded ${
-                            det.isThreat
-                              ? 'bg-error text-on-error'
-                              : det.classType === 'vehicle'
-                              ? 'bg-tertiary text-on-tertiary'
-                              : 'bg-secondary text-on-secondary'
-                          }`}
-                        >
-                          {det.trackId} | {det.confidence}%
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Threat overlay */}
-                    {hasThreat && (
-                      <div className="absolute top-2 right-2 px-2 py-1 bg-error/90 text-on-error rounded-md text-[10px] font-bold flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[12px]">warning</span>
-                        INTRUSION
-                      </div>
-                    )}
-
-                    {/* Camera name */}
-                    <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-on-surface/70 text-surface text-[10px] rounded font-medium">
-                      {camera.name}
-                    </div>
-                  </div>
-
-                  {/* Card Footer */}
-                  <div className="px-3 py-2 flex items-center justify-between border-t border-outline-variant/30">
-                    <div className="text-[11px] text-on-surface-variant">
-                      {camera.detections.length > 0 ? (
-                        <span>
-                          Targets:{' '}
-                          <span className="text-on-surface font-semibold">
-                            {camera.detections.map((d) => `${d.trackId}`).join(', ')}
-                          </span>
-                        </span>
-                      ) : (
-                        <span>No Active Targets</span>
-                      )}
-                    </div>
-                    <span className="text-[11px] text-primary font-semibold group-hover:underline flex items-center gap-0.5">
-                      Inspect <span className="material-symbols-outlined text-[12px]">chevron_right</span>
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+            {cameras.map((camera) => (
+              <DashboardCameraTile
+                key={camera.id}
+                camera={camera}
+                token={authToken || null}
+                zones={zones}
+                onOpen={() => {
+                  onSelectCamera?.(camera.id);
+                  onNavigate('cameras');
+                }}
+                onContextMenu={(e) => handleContextMenu(camera.id, e)}
+                onDetectionsChange={handleTileDetections}
+              />
+            ))}
           </div>
         </div>
 
