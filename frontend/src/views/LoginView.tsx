@@ -61,13 +61,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const { containerRef, setCardRef } = useOrbitPositions(ORBITAL_NODES.length);
-  const { login } = useAuth();
+  const { login, demoLogin } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [utcTime, setUtcTime] = useState(new Date().toISOString().substring(11, 19));
 
@@ -98,8 +99,16 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     }
   };
 
-  const handleQuickDemo = () => {
-    setEmail('admin@ibvap.local');
+  const handleQuickDemo = async () => {
+    setErrorMsg(null);
+    setIsDemoLoading(true);
+    // Enters the existing application through the existing screening
+    // bypass — same session + same App entry path as a normal login.
+    const result = await demoLogin();
+    setIsDemoLoading(false);
+    if (!result.success) {
+      setErrorMsg(result.error || 'Demo mode is unavailable.');
+    }
   };
 
   const handleOAuthLogin = (_provider: string) => {
@@ -377,12 +386,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
               <button
                 type="button"
                 onClick={handleQuickDemo}
-                className="w-full py-2.5 rounded-xl text-[12px] font-semibold border border-dashed border-outline-variant text-on-surface-variant hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-all cursor-pointer"
+                disabled={isDemoLoading || isLoading}
+                className="w-full py-2.5 rounded-xl text-[12px] font-semibold border border-dashed border-outline-variant text-on-surface-variant hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-wait"
               >
                 <span className="material-symbols-outlined text-[14px] mr-1.5 align-middle">
                   rocket_launch
                 </span>
-                Quick Demo Access
+                {isDemoLoading ? 'ENTERING DEMO…' : 'Demo Mode'}
               </button>
             </motion.div>
           </div>

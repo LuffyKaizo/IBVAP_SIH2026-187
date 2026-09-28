@@ -37,7 +37,7 @@ import {
 } from './mockData';
 
 export const AppInner: React.FC = () => {
-  const { isAuthenticated, isInitializing, user, logout, getAuthHeaders } = useAuth();
+  const { isAuthenticated, isInitializing, demoMode, user, logout, getAuthHeaders } = useAuth();
 
   // Authenticated fetch helper — includes JWT in all API calls
   const authFetch = useCallback(async (url: string, init?: RequestInit): Promise<Response> => {
@@ -372,6 +372,13 @@ export const AppInner: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background text-on-surface font-body-base flex flex-col selection:bg-primary selection:text-on-primary">
+      {demoMode && (
+        <div className="fixed bottom-4 right-4 z-50 px-3 py-1.5 rounded-lg border border-primary/40 bg-surface/95 backdrop-blur-sm shadow-lg pointer-events-none">
+          <span className="text-[10px] font-bold tracking-[0.15em] text-primary uppercase">
+            Demo / Screening Mode
+          </span>
+        </div>
+      )}
       <Header
         isOperational={isOperational}
         onOpenDiagnostics={() => setIsDiagnosticsModalOpen(true)}
