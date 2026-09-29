@@ -9,6 +9,20 @@ from pathlib import Path
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 MODELS_DIR: Path = REPO_ROOT / "models"
 
+# Deployment environment: set APP_ENV=production on any real deployment.
+# Auto-detects Render (which exports RENDER_* vars) as production even if
+# APP_ENV was forgotten, so auth bypasses can never silently stay enabled.
+APP_ENV: str = os.getenv("APP_ENV", "")
+
+
+def is_production() -> bool:
+    """True when running in a production deployment."""
+    env = (APP_ENV or os.getenv("NODE_ENV", "")).lower()
+    if env in ("production", "prod"):
+        return True
+    # Render exports RENDER_SERVICE_ID / RENDER_INSTANCE_ID etc.
+    return any(k == "RENDER" or k.startswith("RENDER_") for k in os.environ)
+
 
 @dataclass
 class Settings:

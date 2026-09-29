@@ -18,9 +18,10 @@ _ai_dir = os.path.dirname(os.path.dirname(__file__))
 if _ai_dir not in sys.path:
     sys.path.insert(0, _ai_dir)
 
-# Load .env file from project root
+# Load .env file from the repository root (config.py documents .env at the
+# repo root; _project_root above points at backend/, not the repo root).
 from dotenv import load_dotenv
-load_dotenv(os.path.join(_project_root, ".env"))
+load_dotenv(os.path.join(os.path.dirname(_project_root), ".env"))
 
 from ai.db.models import Base
 
@@ -39,6 +40,11 @@ def get_url():
     """Get async database URL from environment."""
     url = DATABASE_URL
     if not url:
+        from ai.config import is_production
+        if is_production():
+            raise RuntimeError(
+                "DATABASE_URL is not set — refusing to skip migrations in production"
+            )
         print("[ALEMBIC] WARNING: DATABASE_URL not set")
         return ""
     if url.startswith("postgresql://"):

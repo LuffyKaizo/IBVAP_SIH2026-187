@@ -1,5 +1,7 @@
 """FastAPI dependencies for authentication and authorization."""
 
+import os
+
 from fastapi import Depends, HTTPException, status, Query, WebSocket
 from fastapi.security import OAuth2PasswordBearer
 
@@ -7,7 +9,7 @@ from ai.auth.jwt import decode_access_token
 from ai.auth.models import (
     Permission, Role, UserContext, ROLE_PERMISSIONS,
 )
-from ai.config import settings
+from ai.config import is_production, settings
 from ai.db.repositories.user_repo import UserRepository
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
@@ -23,6 +25,15 @@ _DEV_ADMIN_USER = UserContext(
 )
 
 
+def _dev_bypass_enabled() -> bool:
+    """Hardcoded bypass token is accepted ONLY with an explicit dev opt-in
+    flag outside production. Production never honors it."""
+    return (
+        not is_production()
+        and os.getenv("DEV_AUTH_BYPASS", "false").lower() == "true"
+    )
+
+
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
 ) -> UserContext:
@@ -32,7 +43,7 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if token == _DEV_BYPASS_TOKEN:
+    if _dev_bypass_enabled() and token == _DEV_BYPASS_TOKEN:
         return _DEV_ADMIN_USER
     payload = decode_access_token(token, settings.SECRET_KEY)
     if payload is None:
@@ -76,7 +87,7 @@ async def get_user_from_token_query(token: str = Query(None)) -> UserContext:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
         )
-    if token == _DEV_BYPASS_TOKEN:
+    if _dev_bypass_enabled() and token == _DEV_BYPASS_TOKEN:
         return _DEV_ADMIN_USER
     payload = decode_access_token(token, settings.SECRET_KEY)
     if payload is None:
@@ -107,7 +118,7 @@ async def verify_ws_token(websocket: WebSocket) -> UserContext:
     if not token:
         await websocket.close(code=4001, reason="Not authenticated")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-    if token == _DEV_BYPASS_TOKEN:
+    if _dev_bypass_enabled() and token == _DEV_BYPASS_TOKEN:
         return _DEV_ADMIN_USER
     payload = decode_access_token(token, settings.SECRET_KEY)
     if payload is None:
