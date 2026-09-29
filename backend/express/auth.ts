@@ -3,8 +3,45 @@ import jwt from 'jsonwebtoken';
 
 // Read lazily: server.ts imports this module before dotenv.config() runs,
 // so process.env.SECRET_KEY is not yet populated at module-evaluation time.
+export function isProduction(): boolean {
+  const env = (process.env.APP_ENV || process.env.NODE_ENV || '').toLowerCase();
+  return env === 'production' || env === 'prod';
+}
+
+// Production startup guard: hard-fail on missing required env, never fall
+// back to development defaults. Called once from startServer().
+export function requireProductionEnv(): void {
+  if (!isProduction()) return;
+  const missing = ['SECRET_KEY', 'AI_SERVICE_URL'].filter((k) => !process.env[k]);
+  if ((process.env.SCREENING_MODE || '').toLowerCase() === 'true') {
+    missing.push('SCREENING_MODE must be false in production');
+  }
+  if ((process.env.VITE_SCREENING_MODE || '').toLowerCase() === 'true') {
+    missing.push('VITE_SCREENING_MODE must be false/unset in production');
+  }
+  if ((process.env.DEV_AUTH_BYPASS || '').toLowerCase() === 'true') {
+    missing.push('DEV_AUTH_BYPASS must not be enabled in production');
+  }
+  if (missing.length > 0) {
+    console.error('[IBVAP FATAL] Production env validation failed:');
+    for (const m of missing) console.error('  - ' + m);
+    process.exit(1);
+  }
+}
+
 function getSecretKey(): string {
-  return process.env.SECRET_KEY || 'ibvap-dev-secret-change-in-production-32chars';
+  const key = process.env.SECRET_KEY;
+  if (key) return key;
+  if (isProduction()) {
+    throw new Error('SECRET_KEY is not set — refusing to authenticate requests in production');
+  }
+  return 'ibvap-dev-secret-change-in-production-32chars';
+}
+
+// Development-only bypass: requires BOTH an explicit opt-in flag and a
+// non-production environment. Production never honors the hardcoded token.
+function isDevBypassEnabled(): boolean {
+  return !isProduction() && (process.env.DEV_AUTH_BYPASS || '').toLowerCase() === 'true';
 }
 
 export interface AuthUser {
@@ -35,7 +72,7 @@ export function verifyToken(req: Request, res: Response, next: NextFunction): vo
     return;
   }
   const token = authHeader.substring(7);
-  if (token === DEV_BYPASS_TOKEN) {
+  if (isDevBypassEnabled() && token === DEV_BYPASS_TOKEN) {
     req.user = DEV_ADMIN_USER;
     next();
     return;

@@ -2,9 +2,8 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
-import { verifyToken, requireRole } from './auth';
+import { verifyToken, requireRole, isProduction, requireProductionEnv } from './auth';
 import {
   INITIAL_CAMERAS,
   INITIAL_VIRTUAL_ZONES,
@@ -24,6 +23,11 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Capture the platform-provided port BEFORE dotenv injects the shared root
+// .env — that file's PORT=8000 targets the AI service, not this BFF.
+// (Render sets PORT in the real environment, which dotenv never overrides.)
+const EXTERNAL_PORT = process.env.PORT;
+
 // Load .env from project root (same file the Python backend uses)
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
@@ -39,7 +43,11 @@ let settingsStore: SystemSettingsConfig = { ...INITIAL_SETTINGS_CONFIG };
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(EXTERNAL_PORT) || 3000;
+
+  // Production safety: required env must be present, passwordless screening
+  // must be off, and the dev bypass token must never be active.
+  requireProductionEnv();
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -77,9 +85,10 @@ async function startServer() {
     }
   });
 
-  // Screening-mode auto-login (public — only when SCREENING_MODE=true)
+  // Screening-mode auto-login (public — only when SCREENING_MODE=true;
+  // never available in production, regardless of env values)
   app.post('/api/auth/screening-login', express.json(), async (_req, res) => {
-    if (process.env.SCREENING_MODE !== 'true') {
+    if (isProduction() || process.env.SCREENING_MODE !== 'true') {
       return res.status(404).json({ detail: 'Screening mode not enabled' });
     }
     try {
@@ -697,6 +706,7 @@ async function startServer() {
 
   // Vite Middleware for development vs Static serving for production
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const frontendRoot = path.resolve(__dirname, '../../frontend');
     const vite = await createViteServer({
       root: frontendRoot,
@@ -707,8 +717,14 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'frontend', 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    // SPA fallback (GET/HEAD only). Express 5 rejects the legacy '*' pattern
+    // ('Missing parameter name'), so this is a pathless middleware instead.
+    app.use((req, res, next) => {
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        res.sendFile(path.join(distPath, 'index.html'));
+        return;
+      }
+      next();
     });
   }
 

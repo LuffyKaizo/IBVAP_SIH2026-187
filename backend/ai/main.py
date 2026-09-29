@@ -2,6 +2,7 @@
 
 import time
 import asyncio
+import os
 import uuid
 import cv2
 import numpy as np
@@ -20,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
-from ai.config import settings
+from ai.config import is_production, settings
 from ai.detection.yolo_detector import YoloDetector
 from ai.camera.config import CameraConfig
 from ai.camera.manager import CameraManager
@@ -133,10 +134,59 @@ async def lifespan(app):
 
     _blockchain_service = None
     start_time = time.time()
+
+    # --- Production deployment safety: fail fast, never degrade silently ---
+    if is_production():
+        missing = [
+            name for name in ("SECRET_KEY", "DATABASE_URL", "ADMIN_EMAIL", "ADMIN_PASSWORD")
+            if not str(getattr(settings, name, "") or "").strip()
+        ]
+        if missing:
+            raise RuntimeError(
+                "Production startup aborted — missing required environment "
+                "variables: %s" % ", ".join(missing)
+            )
+        db_url = settings.DATABASE_URL
+        if not db_url.split(":", 1)[0] in (
+            "postgresql", "postgres", "postgresql+asyncpg", "postgres+asyncpg"
+        ):
+            raise RuntimeError(
+                "Production startup aborted — DATABASE_URL must be a "
+                "PostgreSQL connection string in production, got scheme %r"
+                % db_url.split(":", 1)[0]
+            )
+        if os.getenv("SCREENING_MODE", "false").lower() == "true":
+            raise RuntimeError(
+                "Production startup aborted — SCREENING_MODE must not be "
+                "enabled in production (passwordless admin auth)."
+            )
+        if os.getenv("DEV_AUTH_BYPASS", "false").lower() == "true":
+            raise RuntimeError(
+                "Production startup aborted — DEV_AUTH_BYPASS must not be "
+                "enabled in production."
+            )
+        if not settings.EVIDENCE_DIR or not os.path.isabs(settings.EVIDENCE_DIR):
+            raise RuntimeError(
+                "Production startup aborted — EVIDENCE_DIR must be an absolute "
+                "path on persistent storage (e.g. /var/data/evidence); the "
+                "container filesystem is ephemeral."
+            )
+        if os.getenv("VITE_SCREENING_MODE", "false").lower() == "true":
+            raise RuntimeError(
+                "Production startup aborted — VITE_SCREENING_MODE must not be "
+                "enabled in production."
+            )
+
     detector.load()
 
     # Initialize database (creates engine + session factory, no held session)
     db_ok = await init_db(settings.DATABASE_URL)
+    if is_production() and not db_ok:
+        raise RuntimeError(
+            "Production startup aborted — PostgreSQL connection failed "
+            "(DATABASE_URL). Persistence is mandatory in production; the "
+            "no-database fallback is not allowed."
+        )
     if db_ok:
         _camera_repo = CameraRepository()
         _zone_repo = ZoneRepository()
