@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
-import { verifyToken, requireRole, isProduction, requireProductionEnv } from './auth';
+import { verifyToken, requireRole, requireProductionEnv } from './auth';
 import {
   INITIAL_CAMERAS,
   INITIAL_VIRTUAL_ZONES,
@@ -85,10 +85,10 @@ async function startServer() {
     }
   });
 
-  // Screening-mode auto-login (public — only when SCREENING_MODE=true;
-  // never available in production, regardless of env values)
+  // Screening-mode auto-login (public — only when SCREENING_MODE=true,
+  // an explicit deployment opt-in; 404 otherwise)
   app.post('/api/auth/screening-login', express.json(), async (_req, res) => {
-    if (isProduction() || process.env.SCREENING_MODE !== 'true') {
+    if (process.env.SCREENING_MODE !== 'true') {
       return res.status(404).json({ detail: 'Screening mode not enabled' });
     }
     try {

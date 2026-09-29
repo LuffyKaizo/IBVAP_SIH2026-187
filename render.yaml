@@ -7,6 +7,11 @@
 # ALLOWED_ORIGINS must list exact origins only — no wildcards.
 # SECRET_KEY is `sync: false` on BOTH services: set the SAME value in both
 # env var groups (the BFF verifies JWTs signed by FastAPI).
+#
+# DEMO MODE: SCREENING_MODE=true (+ VITE_SCREENING_MODE=true on the BFF)
+# auto-authenticates the admin session so the dashboard opens directly with
+# no login page. This is an explicit, intentional opt-in — delete these three
+# values to restore the login page.
 
 databases:
   - name: ibvap-db
@@ -46,7 +51,7 @@ services:
       - key: ALLOWED_ORIGINS
         value: https://ibvap-bff.onrender.com
       - key: SCREENING_MODE
-        value: "false"
+        value: "true"
       - key: SYNC_ENABLED
         value: "false"
       - key: BLOCKCHAIN_ENABLED
@@ -71,7 +76,9 @@ services:
       - key: VITE_AI_SERVICE_URL
         value: https://ibvap-ai.onrender.com
       - key: SCREENING_MODE
-        value: "false"
+        value: "true"
+      - key: VITE_SCREENING_MODE
+        value: "true"
       - key: DEV_AUTH_BYPASS
         value: "false"
       - key: GEMINI_API_KEY

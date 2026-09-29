@@ -134,19 +134,13 @@ async def logout(_user: UserContext = Depends(get_current_user)):
 async def screening_login():
     """Screening-mode auto-login: returns a real JWT for the configured admin user.
 
-    Available ONLY when SCREENING_MODE=true (server-side env var).
+    Available ONLY when SCREENING_MODE=true (server-side env var) — an
+    explicit, intentional deployment opt-in (never on by default).
     No password required — the endpoint is an opt-in demo/screening mechanism.
     Uses the ACTUAL admin user from the database; never fabricates an identity.
-    Never available in production, regardless of env values.
     """
     import os
-    from ai.config import is_production
 
-    if is_production():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Screening mode not enabled",
-        )
     if os.getenv("SCREENING_MODE", "false").lower() != "true":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

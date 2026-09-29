@@ -12,13 +12,10 @@ export function isProduction(): boolean {
 // back to development defaults. Called once from startServer().
 export function requireProductionEnv(): void {
   if (!isProduction()) return;
+  // SCREENING_MODE/VITE_SCREENING_MODE are deliberately allowed here: the
+  // deployed demo opts in explicitly via render.yaml (no login page). The
+  // hardcoded dev bypass token still must never be active in production.
   const missing = ['SECRET_KEY', 'AI_SERVICE_URL'].filter((k) => !process.env[k]);
-  if ((process.env.SCREENING_MODE || '').toLowerCase() === 'true') {
-    missing.push('SCREENING_MODE must be false in production');
-  }
-  if ((process.env.VITE_SCREENING_MODE || '').toLowerCase() === 'true') {
-    missing.push('VITE_SCREENING_MODE must be false/unset in production');
-  }
   if ((process.env.DEV_AUTH_BYPASS || '').toLowerCase() === 'true') {
     missing.push('DEV_AUTH_BYPASS must not be enabled in production');
   }

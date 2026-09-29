@@ -155,11 +155,6 @@ async def lifespan(app):
                 "PostgreSQL connection string in production, got scheme %r"
                 % db_url.split(":", 1)[0]
             )
-        if os.getenv("SCREENING_MODE", "false").lower() == "true":
-            raise RuntimeError(
-                "Production startup aborted — SCREENING_MODE must not be "
-                "enabled in production (passwordless admin auth)."
-            )
         if os.getenv("DEV_AUTH_BYPASS", "false").lower() == "true":
             raise RuntimeError(
                 "Production startup aborted — DEV_AUTH_BYPASS must not be "
@@ -170,11 +165,6 @@ async def lifespan(app):
                 "Production startup aborted — EVIDENCE_DIR must be an absolute "
                 "path on persistent storage (e.g. /var/data/evidence); the "
                 "container filesystem is ephemeral."
-            )
-        if os.getenv("VITE_SCREENING_MODE", "false").lower() == "true":
-            raise RuntimeError(
-                "Production startup aborted — VITE_SCREENING_MODE must not be "
-                "enabled in production."
             )
 
     detector.load()
