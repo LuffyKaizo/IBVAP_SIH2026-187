@@ -1,6 +1,4 @@
-# IBVAP
-
-## Intelligent Border Video Analytics Platform
+# IBVAP — Intelligent Border Video Analytics Platform
 
 > AI video analytics that turns ordinary surveillance cameras into automated border monitoring: it detects and tracks people and vehicles, evaluates zone and behavioral risk, raises alerts, and captures SHA-256 hash-verified evidence — designed to keep working on bandwidth-constrained, intermittently connected sites.
 
@@ -384,8 +382,7 @@ IBVAP/
 │   ├── test.mp4                      # control clip (no vehicles — negative test)
 │   ├── anpr_test/                    # synthetic plate/vehicle images for format tests
 │   └── face_validation/              # face sample images
-├── docs/                             # architecture notes, design docs, phase reports
-│   └── superpowers/reports/          # measured baseline/phase reports (source of metrics below)
+├── docs/                             # architecture and technical documentation
 ├── scripts/                          # start-ibvap / stop-ibvap, ensure_admin, check_db, reset password
 ├── .github/workflows/ci.yml          # CI: pytest + tsc + vite build
 ├── start_backend.py                  # Python service launcher (port pre-check + health poll)
@@ -439,7 +436,7 @@ Notable files: `backend/ai/pipeline.py` is the per-camera orchestrator; `backend
 | Persistence gate | Requires status + non-null text + **format VALID** + OCR conf ≥ 0.5 |
 | API | `GET /anpr` (filters: camera, limit 1–500, search, status), permission `ANPR_READ`; Express proxy `GET /api/anpr`; manual scan `POST /api/anpr/scan` (in-memory) |
 | Frontend | ANPR tab: plate search, status filter, history table, manual plate scan form, live updates over WebSocket |
-| Observability | Bounded per-candidate log with selection reason; harness instrumentation for offline runs |
+| Observability | Bounded per-candidate log with selection reason; per-variant statistics counters |
 
 ### What is experimental
 
@@ -848,29 +845,28 @@ Three jobs: Python pytest (informational — currently `|| true` masked), TypeSc
 
 ### Validation with real footage
 
-Validation is video-driven (no field deployment yet). Three committed clips are run end-to-end through an instrumented harness (detection → tracking → events → evidence) with counts compared across changes; `data/test.mp4` serves as the negative control (**0 detections** — no false positives). Measured numbers, with conditions, are in the next section; the full methodology and per-phase comparisons live in `docs/superpowers/reports/`.
+Validation is video-driven (no field deployment yet). Three committed clips are exercised end-to-end (detection → tracking → events → evidence), and `data/test.mp4` serves as the negative control (**0 detections** — no false positives). Measured numbers, with conditions, are in the next section.
 
 ---
 
 ## Performance / Results
 
-All figures below are **measured** on the local test clips (CPU, Python 3.12) and sourced from `docs/superpowers/reports/`; no precision/recall figures are claimed because no annotated ground-truth evaluation has been run.
+All figures below are **measured** on the local test clips (CPU, Python 3.12) during system validation; no precision/recall figures are claimed because no annotated ground-truth evaluation has been run.
 
-| Metric | Result | Conditions / source |
+| Metric | Result | Conditions |
 |---|---|---|
-| Vehicle detect + track | 63.4 ms/frame average | 852×480 30 fps demo clip, CPU (report `2026-09-25-anpr-investigation`) |
-| Full-frame plate detection | 0.024 s/frame (demo), 0.063 s/frame (4K sample) | 536 f / 300 f runs (`2026-09-27-anpr-phase3a1`) |
-| End-to-end pipeline run | 99.1 s for 536 frames (incl. OCR, evidence, DB-less mode) | same demo clip (`...-phase3a2`) |
-| Plate→vehicle association | 80.9% (demo) / 93.8% (sample) of plate detections associated | `...-phase3a1` |
-| OCR read rate | sample: 39/39 attempts non-empty (100%), confidence p50 0.454; demo: 58/80 (72.5%), p50 0.224 | `...-phase3a1` / `...-phase3a2` |
-| Format-valid plate reads | **0** on all tested footage (108–110 candidates per run) | `...-phase3a2` — accuracy work in progress |
+| Vehicle detect + track | 63.4 ms/frame average | 852×480 30 fps clip, CPU |
+| Full-frame plate detection | 0.024 s/frame (demo), 0.063 s/frame (4K) | 536-frame / 300-frame runs, CPU |
+| End-to-end pipeline run | 99.1 s for 536 frames (incl. OCR, evidence, non-persistent mode) | 852×480 demo clip, CPU |
+| Plate→vehicle association | 80.9% (demo) / 93.8% (sample) of plate detections associated | same clips |
+| OCR read rate | sample: 39/39 attempts non-empty (100%), confidence p50 0.454; demo: 58/80 (72.5%), p50 0.224 | same clips |
+| Format-valid plate reads | **0** on all tested footage (108–110 candidates per run) | accuracy work in progress |
 | Negative control | 0 detections on `data/test.mp4` (300 f) | no false-positive events |
-| Record stability | Track→record key churn reduced from max 12 → 4 (demo) after stabilization fixes | `...-phase2-core-fixes` |
-| WebSocket throughput | 283 metadata messages / 30 s (≈9.4/s, matches `INFERENCE_FPS=10`) | `...-phase2-core-fixes` |
-| WebSocket handshake | socket open 78 ms; first message ≤ 517 ms | `2026-09-24-phase0-diagnostic` |
-| Test suite | 539 passed / 6 deferred-fail of 545 | current HEAD |
-| Frontend build | passes: `✓ built in ~14 s`, 1043 modules; typecheck 0 errors | phase0/phase2 reports |
-| Historical suite health | 408→441 passed after stability phase (0 regressions) | `2026-09-24-phase1-local-stability` |
+| Record stability | Track→record key churn: max 12 → 4 records per run (demo) | after temporal stabilization |
+| WebSocket throughput | 283 metadata messages / 30 s (≈9.4/s, matches `INFERENCE_FPS=10`) | 30 s observation window |
+| WebSocket handshake | socket open 78 ms; first message ≤ 517 ms | local connection |
+| Test suite | 539 passed / 6 deferred-fail of 545 | current codebase |
+| Frontend build | passes: ~14 s, 1043 modules; typecheck 0 errors | local build |
 
 **Not measured (stated honestly):** precision/recall/F1 against annotated datasets, FPS under N-camera concurrency load, GPU-accelerated numbers, memory ceilings, multi-site field trials, ONVIF interop.
 
@@ -878,7 +874,7 @@ All figures below are **measured** on the local test clips (CPU, Python 3.12) an
 
 ## Limitations
 
-1. **ANPR accuracy is not yet deployment-ready.** 0 format-valid reads on all tested clips; production persistence gate therefore stores 0 plate records for this footage. Actively developed (Phase 3A); see `docs/superpowers/reports/2026-09-27-anpr-phase3a2-reference-ocr.md`.
+1. **ANPR accuracy is not yet deployment-ready.** 0 format-valid reads on all tested clips; production persistence gate therefore stores 0 plate records for this footage. Actively under development.
 2. **Prototype layers:** alert acknowledge/resolve persists in-memory only (Express store, not the database); Reports, Settings, suspicious-events, and activity-endpoints are in-memory/demo data; AI-Analytics hyperparameter sliders do not drive the backend.
 3. **Models are generic, not border-fine-tuned.** YOLOv8n is COCO-pretrained; the plate model is a small single-class detector; no dataset fine-tuning or benchmark evaluation (no mAP/precision/recall measured).
 4. **Face = detection only.** No recognition, matching, or biometric templates — by design.
@@ -899,7 +895,7 @@ All figures below are **measured** on the local test clips (CPU, Python 3.12) an
 
 **In progress**
 
-- ANPR accuracy program (Phase 3A): crop-geometry verification, per-region OCR using discarded bounding boxes, positional normalization — with hard success gates (format-valid ∧ confidence-qualified candidates) and measured A/B validation at each step.
+- ANPR accuracy program: crop-geometry verification, per-region OCR using the bounding boxes currently discarded after detection, positional normalization — with hard success gates (format-valid and confidence-qualified candidates) and measured A/B validation at each step.
 
 **Planned (not implemented)**
 
@@ -938,7 +934,6 @@ All figures below are **measured** on the local test clips (CPU, Python 3.12) an
 
 - VIRAT Video Dataset (surveillance footage) — https://viratdata.org/ (source of one local sample clip; clips are not committed)
 
-**Internal documentation**
+**Project documentation**
 
-- `docs/superpowers/reports/` — measured baselines and phase reports cited in this README
 - `models/README.md` — model inventory with SHA-256 hashes
