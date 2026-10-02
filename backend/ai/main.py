@@ -147,13 +147,21 @@ async def lifespan(app):
                 "variables: %s" % ", ".join(missing)
             )
         db_url = settings.DATABASE_URL
-        if not db_url.split(":", 1)[0] in (
-            "postgresql", "postgres", "postgresql+asyncpg", "postgres+asyncpg"
+        db_scheme = db_url.split(":", 1)[0]
+        if db_scheme not in (
+            "postgresql", "postgres", "postgresql+asyncpg", "postgres+asyncpg",
+            "sqlite", "sqlite+aiosqlite",
         ):
             raise RuntimeError(
                 "Production startup aborted — DATABASE_URL must be a "
-                "PostgreSQL connection string in production, got scheme %r"
-                % db_url.split(":", 1)[0]
+                "PostgreSQL or SQLite connection string in production, "
+                "got scheme %r" % db_scheme
+            )
+        if db_scheme.startswith("sqlite") and ":memory:" in db_url:
+            raise RuntimeError(
+                "Production startup aborted — in-memory SQLite is not "
+                "allowed in production; use a file on persistent storage "
+                "(e.g. sqlite+aiosqlite:////var/data/ibvap.db)."
             )
         if os.getenv("DEV_AUTH_BYPASS", "false").lower() == "true":
             raise RuntimeError(
@@ -173,7 +181,7 @@ async def lifespan(app):
     db_ok = await init_db(settings.DATABASE_URL)
     if is_production() and not db_ok:
         raise RuntimeError(
-            "Production startup aborted — PostgreSQL connection failed "
+            "Production startup aborted — Database connection failed "
             "(DATABASE_URL). Persistence is mandatory in production; the "
             "no-database fallback is not allowed."
         )

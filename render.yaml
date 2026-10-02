@@ -1,23 +1,26 @@
-# Render Blueprint for IBVAP — two web services, PostgreSQL, persistent evidence disk.
+# Render Blueprint for IBVAP — two web services and a persistent disk.
 #
-# Before first deploy, update these placeholders to your actual service URLs:
-#   https://ibvap-ai.onrender.com   -> your FastAPI service URL  (AI_SERVICE_URL,
-#                                      VITE_AI_SERVICE_URL, and the BFF origin in ALLOWED_ORIGINS)
-#   https://ibvap-bff.onrender.com  -> your BFF service URL      (ALLOWED_ORIGINS on ibvap-ai)
-# ALLOWED_ORIGINS must list exact origins only — no wildcards.
+# Deployment reality (updated):
+#   https://ibvap-uzs5.onrender.com  -> the EXISTING BFF service (keep it;
+#                                      do NOT recreate it from this file)
+#   https://ibvap-ai.onrender.com    -> the FastAPI/AI service this blueprint
+#                                      creates (name MUST be `ibvap-ai`: the
+#                                      BFF's AI_SERVICE_URL and the built
+#                                      frontend's VITE_AI_SERVICE_URL already
+#                                      point there)
+# ALLOWED_ORIGINS must list exact origins only — no wildcards. It must
+# contain the actual BFF origin above.
 # SECRET_KEY is `sync: false` on BOTH services: set the SAME value in both
 # env var groups (the BFF verifies JWTs signed by FastAPI).
+# ADMIN_EMAIL / ADMIN_PASSWORD seed the admin account at FastAPI startup.
+#
+# DATABASE: SQLite on the persistent disk (no PostgreSQL). The file lives at
+# /var/data/ibvap.db on the ibvap-evidence disk mounted below.
 #
 # DEMO MODE: SCREENING_MODE=true (+ VITE_SCREENING_MODE=true on the BFF)
-# auto-authenticates the admin session so the dashboard opens directly with
-# no login page. This is an explicit, intentional opt-in — delete these three
-# values to restore the login page.
-
-databases:
-  - name: ibvap-db
-    plan: starter
-    databaseName: ibvap
-    user: ibvap
+# auto-authenticates the admin session so Demo Mode / screening login works
+# with no password. This is an explicit, intentional opt-in — delete these
+# three values to restore password-only login.
 
 services:
   - type: web
@@ -39,9 +42,7 @@ services:
       - key: SECRET_KEY
         sync: false
       - key: DATABASE_URL
-        fromDatabase:
-          name: ibvap-db
-          property: connectionString
+        value: sqlite+aiosqlite:////var/data/ibvap.db
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
@@ -49,7 +50,7 @@ services:
       - key: EVIDENCE_DIR
         value: /var/data/evidence
       - key: ALLOWED_ORIGINS
-        value: https://ibvap-bff.onrender.com
+        value: https://ibvap-uzs5.onrender.com
       - key: SCREENING_MODE
         value: "true"
       - key: SYNC_ENABLED
