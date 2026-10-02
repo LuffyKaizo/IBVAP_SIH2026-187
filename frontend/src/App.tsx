@@ -1,6 +1,6 @@
 import { useAiAlerts } from './hooks/useAiAlerts';
 import { useAiAnpr } from './hooks/useAiAnpr';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Header } from './components/Header';
 import { Sidebar, NavPath } from './components/Sidebar';
 import { Footer } from './components/Footer';
@@ -37,7 +37,7 @@ import {
 } from './mockData';
 
 export const AppInner: React.FC = () => {
-  const { isAuthenticated, isInitializing, demoMode, user, logout, getAuthHeaders } = useAuth();
+  const { isAuthenticated, isInitializing, demoMode, user, logout, getAuthHeaders, demoLogin } = useAuth();
 
   // Authenticated fetch helper — includes JWT in all API calls
   const authFetch = useCallback(async (url: string, init?: RequestInit): Promise<Response> => {
@@ -252,6 +252,23 @@ export const AppInner: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  // One-time session establishment for the login-page-free entry flow.
+  // With the login gate bypassed, nothing else would create the JWT that
+  // every existing feature depends on (verifyToken APIs, ADMIN-gated
+  // Settings, tokened MJPEG/WS streams). Reuse the EXISTING screening
+  // bypass (demoLogin -> POST /api/auth/screening-login) exactly once when
+  // the app starts unauthenticated — the same real session a manual login
+  // produces, server-gated by SCREENING_MODE=true. No new auth system, no
+  // fake or hardcoded tokens. Runs after AuthContext init so screening
+  // mode's own auto-login is never duplicated, and never re-fires after
+  // an explicit logout.
+  const autoSessionRef = useRef(false);
+  useEffect(() => {
+    if (autoSessionRef.current || isInitializing) return;
+    autoSessionRef.current = true;
+    if (!isAuthenticated) void demoLogin();
+  }, [isInitializing, isAuthenticated, demoLogin]);
 
   const handleSelectCamera = (id: string) => { setSelectedCameraId(id); setCurrentPath('cameras'); };
   const handleSelectAlert = (id: string) => { setSelectedAlertId(id); setCurrentPath('event-intelligence'); };
