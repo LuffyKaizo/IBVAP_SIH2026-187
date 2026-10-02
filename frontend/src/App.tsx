@@ -366,9 +366,14 @@ export const AppInner: React.FC = () => {
     );
   }
 
-  if (!isAuthenticated) {
-    return <LoginView onLogin={handleLogin} />;
-  }
+  // TEMPORARY (easy to revert): frontend login gate bypassed — the existing
+  // dashboard mounts directly at the root URL while unauthenticated. No other
+  // behavior changed: LoginView, AuthContext, all API/stream/WS code, and
+  // backend auth remain intact. To restore the login page, delete this
+  // comment and restore:
+  //   if (!isAuthenticated) {
+  //     return <LoginView onLogin={handleLogin} />;
+  //   }
 
   return (
     <div className="min-h-screen bg-background text-on-surface font-body-base flex flex-col selection:bg-primary selection:text-on-primary">
