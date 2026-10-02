@@ -1,32 +1,68 @@
-# Render Blueprint for IBVAP — two web services and a persistent disk.
+# Render Blueprint for IBVAP — real deployment architecture: two web services + persistent disk.
 #
-# Deployment reality (updated):
-#   https://ibvap-uzs5.onrender.com  -> the EXISTING BFF service (keep it;
-#                                      do NOT recreate it from this file)
-#   https://ibvap-ai.onrender.com    -> the FastAPI/AI service this blueprint
-#                                      creates (name MUST be `ibvap-ai`: the
-#                                      BFF's AI_SERVICE_URL and the built
-#                                      frontend's VITE_AI_SERVICE_URL already
-#                                      point there)
-# ALLOWED_ORIGINS must list exact origins only — no wildcards. It must
-# contain the actual BFF origin above.
-# SECRET_KEY is `sync: false` on BOTH services: set the SAME value in both
-# env var groups (the BFF verifies JWTs signed by FastAPI).
-# ADMIN_EMAIL / ADMIN_PASSWORD seed the admin account at FastAPI startup.
+# ARCHITECTURE (matches the live deployment):
+#   SERVICE A — IBVAP (EXISTS ALREADY — do NOT recreate and do NOT rename):
+#     https://ibvap-uzs5.onrender.com — Express/BFF + built React frontend.
+#     Serves /api/* and the static frontend; proxies AI calls to SERVICE B.
+#   SERVICE B — ibvap-ai (FastAPI/AI backend): login + screening-login auth,
+#     camera registry, MJPEG streams, YOLO metadata, WebSockets, SQLite.
 #
-# DATABASE: SQLite on the persistent disk (no PostgreSQL). The file lives at
-# /var/data/ibvap.db on the ibvap-evidence disk mounted below.
+# IMPORTANT:
+#   * Deploy BOTH services from branch `Siddhesh-Work`. The `main` branch does
+#     NOT contain the SQLite production-startup guard fix; a production FastAPI
+#     started from `main` aborts with "DATABASE_URL must be PostgreSQL".
+#   * AI_SERVICE_URL and VITE_AI_SERVICE_URL are `sync: false`: after SERVICE B
+#     is created, copy its ACTUAL assigned onrender.com URL into BOTH vars on
+#     SERVICE A in the Render dashboard, then REDeploy SERVICE A — the Vite
+#     bundle bakes VITE_AI_SERVICE_URL at BUILD time, so a runtime-only change
+#     does not update already-built stream/WebSocket URLs.
+#   * SECRET_KEY is `sync: false` on BOTH services: set the SAME value in both
+#     env var groups (the BFF verifies JWTs signed by FastAPI).
+#   * ADMIN_EMAIL / ADMIN_PASSWORD seed the admin account at FastAPI startup.
 #
-# DEMO MODE: SCREENING_MODE=true (+ VITE_SCREENING_MODE=true on the BFF)
+# DATABASE: SQLite on the persistent disk (no PostgreSQL anywhere). The file
+# lives at /var/data/ibvap.db on the disk mounted below; evidence at
+# /var/data/evidence. EVIDENCE_DIR must stay an absolute path (production guard).
+#
+# DEMO MODE: SCREENING_MODE=true (+ VITE_SCREENING_MODE=true on SERVICE A)
 # auto-authenticates the admin session so Demo Mode / screening login works
 # with no password. This is an explicit, intentional opt-in — delete these
 # three values to restore password-only login.
 
 services:
   - type: web
+    name: IBVAP
+    runtime: node
+    plan: starter
+    branch: Siddhesh-Work
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: production
+      - key: SECRET_KEY
+        sync: false
+      - key: AI_SERVICE_URL
+        sync: false
+      - key: VITE_AI_SERVICE_URL
+        sync: false
+      - key: SCREENING_MODE
+        value: "true"
+      - key: VITE_SCREENING_MODE
+        value: "true"
+      - key: DEV_AUTH_BYPASS
+        value: "false"
+      - key: GEMINI_API_KEY
+        sync: false
+
+  - type: web
     name: ibvap-ai
     runtime: python
     plan: starter
+    branch: Siddhesh-Work
     buildCommand: pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install -r backend/ai/requirements.txt
     startCommand: sh scripts/start-fastapi.sh
     healthCheckPath: /health
@@ -57,30 +93,3 @@ services:
         value: "false"
       - key: BLOCKCHAIN_ENABLED
         value: "false"
-
-  - type: web
-    name: ibvap-bff
-    runtime: node
-    plan: starter
-    buildCommand: npm install --include=dev && npm run build
-    startCommand: npm start
-    healthCheckPath: /api/health
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: APP_ENV
-        value: production
-      - key: SECRET_KEY
-        sync: false
-      - key: AI_SERVICE_URL
-        value: https://ibvap-ai.onrender.com
-      - key: VITE_AI_SERVICE_URL
-        value: https://ibvap-ai.onrender.com
-      - key: SCREENING_MODE
-        value: "true"
-      - key: VITE_SCREENING_MODE
-        value: "true"
-      - key: DEV_AUTH_BYPASS
-        value: "false"
-      - key: GEMINI_API_KEY
-        sync: false
