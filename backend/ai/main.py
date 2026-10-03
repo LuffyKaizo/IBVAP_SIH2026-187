@@ -378,19 +378,21 @@ async def lifespan(app):
                 if not cam_zones:
                     cam_zones = _build_default_zones(cam_config.camera_id)
                 await camera_manager.register_camera(
-                    cam_config, auto_start=cam_config.enabled, zones=cam_zones
+                    cam_config, auto_start=cam_config.enabled and settings.CAMERA_AUTO_START, zones=cam_zones
                 )
             print("[STARTUP] Loaded %d cameras from database" % len(cameras))
+            if not settings.CAMERA_AUTO_START:
+                print("[STARTUP] CAMERA_AUTO_START=false — cameras registered but not auto-started")
         elif settings.VIDEO_SOURCE:
             seed_cam = _build_seed_camera()
             await _camera_repo.create(seed_cam)
-            await camera_manager.register_camera(seed_cam, auto_start=True)
+            await camera_manager.register_camera(seed_cam, auto_start=settings.CAMERA_AUTO_START)
             print("[STARTUP] Seeded CAM-01 from env config (database was empty)")
         else:
             print("[STARTUP] No cameras in database and no VIDEO_SOURCE configured")
     else:
         cam01 = _build_seed_camera()
-        camera_manager._sync_register_camera(cam01, auto_start=True)
+        camera_manager._sync_register_camera(cam01, auto_start=settings.CAMERA_AUTO_START)
         print("[STARTUP] Registered CAM-01 in-memory (no database)")
 
     # Start background workers
@@ -568,7 +570,7 @@ async def register_camera(
         )
         info = await camera_manager.register_camera(
             config,
-            auto_start=req.enabled,
+            auto_start=req.enabled and settings.CAMERA_AUTO_START,
             zones=_build_default_zones(req.camera_id),
             actor=user.user_id,
         )

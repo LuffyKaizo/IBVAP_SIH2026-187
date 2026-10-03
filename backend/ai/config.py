@@ -69,6 +69,11 @@ class Settings:
     AI_SERVICE_HOST: str = os.getenv("AI_SERVICE_HOST", "0.0.0.0")
     AI_SERVICE_PORT: int = int(os.getenv("AI_SERVICE_PORT", "8000"))
 
+    # Camera startup. true (default) preserves current behavior: enabled
+    # cameras auto-start during application startup. false registers cameras
+    # but leaves them waiting for an explicit start (memory-limited hosts).
+    CAMERA_AUTO_START: bool = os.getenv("CAMERA_AUTO_START", "true").lower() == "true"
+
     # Paths
     BASE_DIR: Path = Path(__file__).resolve().parent
     DATA_DIR: Path = BASE_DIR / "data"

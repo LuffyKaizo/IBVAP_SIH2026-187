@@ -16,6 +16,7 @@ import threading
 from typing import Optional
 
 from ai.camera.config import CameraConfig
+from ai.config import settings
 from ai.pipeline import ProcessingPipeline
 from ai.events.engine import EventEngine, Zone
 from ai.events.behavior import BehaviorEngine
@@ -79,16 +80,23 @@ class CameraPipeline:
         self._pipeline.set_face_detector(self._face_detector)
 
     def initialize(self) -> bool:
-        """Initialize OCR engine and face detector. Call once after construction."""
-        try:
-            self._ocr_engine.initialize()
-        except Exception as e:
-            print("[CAMERA-PIPELINE] OCR init failed for %s: %s" % (self.camera_id, e))
+        """Initialize OCR engine and face detector. Call once after construction.
 
-        try:
-            self._face_detector.initialize()
-        except Exception as e:
-            print("[CAMERA-PIPELINE] Face detector init failed for %s: %s" % (self.camera_id, e))
+        When CAMERA_AUTO_START=false this eager initialization is skipped so
+        camera registration stays cheap on memory-limited hosts. Both engines
+        initialize lazily on first use, so a camera started explicitly later
+        still gets OCR and face detection.
+        """
+        if settings.CAMERA_AUTO_START:
+            try:
+                self._ocr_engine.initialize()
+            except Exception as e:
+                print("[CAMERA-PIPELINE] OCR init failed for %s: %s" % (self.camera_id, e))
+
+            try:
+                self._face_detector.initialize()
+            except Exception as e:
+                print("[CAMERA-PIPELINE] Face detector init failed for %s: %s" % (self.camera_id, e))
 
         return True
 
