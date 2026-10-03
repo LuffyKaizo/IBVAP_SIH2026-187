@@ -168,11 +168,21 @@ async def lifespan(app):
                 "Production startup aborted — DEV_AUTH_BYPASS must not be "
                 "enabled in production."
             )
-        if not settings.EVIDENCE_DIR or not os.path.isabs(settings.EVIDENCE_DIR):
+        if not settings.EVIDENCE_DIR or (
+            not os.path.isabs(settings.EVIDENCE_DIR)
+            and not settings.EPHEMERAL_STORAGE
+        ):
             raise RuntimeError(
                 "Production startup aborted — EVIDENCE_DIR must be an absolute "
                 "path on persistent storage (e.g. /var/data/evidence); the "
                 "container filesystem is ephemeral."
+            )
+        if settings.EPHEMERAL_STORAGE and not os.path.isabs(settings.EVIDENCE_DIR):
+            print(
+                "[STARTUP] WARNING: EPHEMERAL_STORAGE=true — storage is "
+                "NON-PERSISTENT. EVIDENCE_DIR=%s and the SQLite/runtime data "
+                "are on the container filesystem and will be LOST on every "
+                "Render redeploy, restart or hibernation." % settings.EVIDENCE_DIR
             )
 
     detector.load()
@@ -446,6 +456,7 @@ async def health_check():
         "device": settings.get_device(),
         "uptime_seconds": uptime,
         "cameras": agg,
+        "storage_mode": "ephemeral" if settings.EPHEMERAL_STORAGE else "persistent",
     }
 
 

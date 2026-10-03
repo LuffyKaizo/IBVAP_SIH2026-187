@@ -172,6 +172,13 @@ class Settings:
     # Fraction of the target bbox added on each side when cropping TARGET_CROP
     # evidence (spec: target-centric crop, clamped 0.0-0.5)
     EVIDENCE_TARGET_CROP_MARGIN: float = float(os.getenv("EVIDENCE_TARGET_CROP_MARGIN", "0.2"))
+    # Explicit opt-in for non-persistent storage (e.g. Render Free, no disk).
+    # Default false: normal production still requires EVIDENCE_DIR to be an
+    # absolute path on persistent storage. Set to "true" ONLY for a demo
+    # deployment where the container filesystem is wiped on every redeploy,
+    # restart or hibernation — all evidence, SQLite rows and other runtime
+    # data are lost then.
+    EPHEMERAL_STORAGE: bool = os.getenv("EPHEMERAL_STORAGE", "false").lower() == "true"
 
     # Store-and-Forward Synchronization
     SYNC_ENABLED: bool = os.getenv("SYNC_ENABLED", "true").lower() == "true"
