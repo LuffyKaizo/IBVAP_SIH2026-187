@@ -126,6 +126,59 @@ def _build_seed_camera() -> CameraConfig:
     )
 
 
+def _demo_camera_ids() -> list:
+    """Active demo allow-list: DEMO_CAMERA_IDS, but only in demo mode.
+
+    Demo mode means global auto-start is switched off (CAMERA_AUTO_START=false)
+    and a non-empty allow-list was configured. Returns [] otherwise, so a plain
+    local run (CAMERA_AUTO_START=true) keeps its existing behavior untouched.
+    """
+    if settings.CAMERA_AUTO_START:
+        return []
+    return settings.demo_camera_ids()
+
+
+def _demo_source_exists(source: str) -> bool:
+    """True when a local file source resolves, from CWD or project root.
+
+    Mirrors the path resolution in ai.video.capture so the pre-flight check
+    accepts exactly the sources the pipeline itself would accept.
+    """
+    if os.path.exists(source):
+        return True
+    # backend/ai/main.py -> two levels up = project root (video files live in
+    # ./data relative to the project root, while the backend runs from backend/)
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.exists(os.path.join(project_root, source))
+
+
+def _demo_source_problem(config: CameraConfig) -> Optional[str]:
+    """Pre-flight a demo camera source. Returns None if it is usable.
+
+    Local sources are existence-checked and opened once (and released again)
+    before the pipeline starts, so a missing or corrupt file becomes a logged
+    per-camera failure instead of a broken stream. Network and webcam sources
+    are handed straight to the capture layer, which owns their retry logic and
+    would otherwise block startup on an unreachable host.
+    """
+    source = (config.source or "").strip()
+    if not source:
+        return "no source configured"
+    source_type = config.source_type or "video"
+    if source_type != "video" or source.lower().startswith(("rtsp://", "rtsps://", "http://", "https://")):
+        return None
+    if not _demo_source_exists(source):
+        return "source not found: %s" % source
+    from ai.video.capture import VideoCapture
+    capture = VideoCapture(source, source_type)
+    try:
+        if not capture.open():
+            return "source cannot be opened: %s" % source
+    finally:
+        capture.release()
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app):
     global start_time, camera_manager, _camera_repo, _zone_repo
@@ -378,7 +431,8 @@ async def lifespan(app):
                 if not cam_zones:
                     cam_zones = _build_default_zones(cam_config.camera_id)
                 await camera_manager.register_camera(
-                    cam_config, auto_start=cam_config.enabled and settings.CAMERA_AUTO_START, zones=cam_zones
+                    cam_config, auto_start=cam_config.enabled and settings.CAMERA_AUTO_START,
+                    zones=cam_zones, persist=False,
                 )
             print("[STARTUP] Loaded %d cameras from database" % len(cameras))
             if not settings.CAMERA_AUTO_START:
@@ -386,7 +440,9 @@ async def lifespan(app):
         elif settings.VIDEO_SOURCE:
             seed_cam = _build_seed_camera()
             await _camera_repo.create(seed_cam)
-            await camera_manager.register_camera(seed_cam, auto_start=settings.CAMERA_AUTO_START)
+            await camera_manager.register_camera(
+                seed_cam, auto_start=settings.CAMERA_AUTO_START, persist=False
+            )
             print("[STARTUP] Seeded CAM-01 from env config (database was empty)")
         else:
             print("[STARTUP] No cameras in database and no VIDEO_SOURCE configured")
@@ -394,6 +450,44 @@ async def lifespan(app):
         cam01 = _build_seed_camera()
         camera_manager._sync_register_camera(cam01, auto_start=settings.CAMERA_AUTO_START)
         print("[STARTUP] Registered CAM-01 in-memory (no database)")
+
+    # Targeted demo startup: start ONLY the configured demo cameras, one at a
+    # time. Each camera is validated and started inside its own try/except so a
+    # missing file or a failed pipeline can never stop the server or keep the
+    # remaining demo cameras from coming up.
+    demo_ids = _demo_camera_ids()
+    if demo_ids:
+        print("[STARTUP] DEMO_CAMERA_IDS=%s" % ",".join(demo_ids))
+        demo_running = 0
+        for demo_id in demo_ids:
+            try:
+                pipeline = camera_manager.get_pipeline(demo_id)
+                if pipeline is None:
+                    print("[STARTUP] Demo camera %s failed: not registered" % demo_id)
+                    continue
+                if pipeline.is_running:
+                    print("[STARTUP] Demo camera %s already running" % demo_id)
+                    demo_running += 1
+                    continue
+                if not pipeline.config.enabled:
+                    print("[STARTUP] Demo camera %s failed: camera disabled" % demo_id)
+                    continue
+                problem = _demo_source_problem(pipeline.config)
+                if problem:
+                    print("[STARTUP] Demo camera %s failed: %s" % (demo_id, problem))
+                    continue
+                print("[STARTUP] Starting demo camera %s" % demo_id)
+                result = await camera_manager.start_camera(demo_id, actor="SYSTEM")
+                if result.get("error"):
+                    print("[STARTUP] Demo camera %s failed: %s" % (demo_id, result["error"]))
+                elif not result.get("started"):
+                    print("[STARTUP] Demo camera %s failed: pipeline did not start" % demo_id)
+                else:
+                    demo_running += 1
+                    print("[STARTUP] Demo camera %s started successfully" % demo_id)
+            except Exception as exc:
+                print("[STARTUP] Demo camera %s failed: %s" % (demo_id, exc))
+        print("[STARTUP] Demo cameras running: %d" % demo_running)
 
     # Start background workers
     await _network_health.start()
@@ -535,7 +629,13 @@ async def list_cameras(
 ):
     if camera_manager is None:
         return []
-    return camera_manager.list_cameras()
+    cameras = camera_manager.list_cameras()
+    # Demo mode: only the allow-listed cameras are presented to clients, so the
+    # judge-facing camera wall never shows an inactive, stopped camera.
+    demo_ids = _demo_camera_ids()
+    if demo_ids:
+        cameras = [c for c in cameras if c.get("camera_id") in demo_ids]
+    return cameras
 
 
 @app.get("/cameras/{camera_id}")

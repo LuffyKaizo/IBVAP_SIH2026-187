@@ -74,6 +74,14 @@ class Settings:
     # but leaves them waiting for an explicit start (memory-limited hosts).
     CAMERA_AUTO_START: bool = os.getenv("CAMERA_AUTO_START", "true").lower() == "true"
 
+    # Targeted demo allow-list: the cameras that should actually start and be
+    # shown during a demo deployment, as a comma-separated list of camera IDs.
+    # Only takes effect when CAMERA_AUTO_START=false — then the listed cameras
+    # are started one at a time at boot while every other registered camera is
+    # left stopped and hidden from the camera list. Set to an empty string to
+    # disable demo mode (CAMERA_AUTO_START=false then starts nothing at all).
+    DEMO_CAMERA_IDS: str = os.getenv("DEMO_CAMERA_IDS", "CAM-05,CAM-07")
+
     # Paths
     BASE_DIR: Path = Path(__file__).resolve().parent
     DATA_DIR: Path = BASE_DIR / "data"
@@ -231,6 +239,15 @@ class Settings:
     BLOCKCHAIN_ANCHOR_POLICY: str = os.getenv("BLOCKCHAIN_ANCHOR_POLICY", "high_severity")  # all | high_severity | manual_only
     BLOCKCHAIN_ANCHOR_MIN_SEVERITY: str = os.getenv("BLOCKCHAIN_ANCHOR_MIN_SEVERITY", "HIGH")
     BLOCKCHAIN_LOCAL_LATENCY_MS: float = float(os.getenv("BLOCKCHAIN_LOCAL_LATENCY_MS", "0"))
+
+    def demo_camera_ids(self) -> list:
+        """Parse DEMO_CAMERA_IDS into an ordered, de-duplicated list of IDs."""
+        ids = []
+        for raw in self.DEMO_CAMERA_IDS.split(","):
+            cam_id = raw.strip()
+            if cam_id and cam_id not in ids:
+                ids.append(cam_id)
+        return ids
 
     def get_device(self) -> str:
         """Resolve device string. Auto-detects CUDA."""

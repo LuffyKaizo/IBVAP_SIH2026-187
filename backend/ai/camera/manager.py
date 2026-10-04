@@ -102,19 +102,24 @@ class CameraManager:
         return config.to_dict()
 
     async def register_camera(self, config: CameraConfig, auto_start: bool = False,
-                              zones: Optional[List[Zone]] = None, actor: str = "SYSTEM") -> dict:
+                              zones: Optional[List[Zone]] = None, actor: str = "SYSTEM",
+                              persist: bool = True) -> dict:
         """Register a new camera and optionally start its pipeline.
 
         Returns camera info dict. Raises ValueError on duplicate camera_id.
-        If camera_repo is available, also persists to PostgreSQL.
+        When persist is true and camera_repo is available, also persists to
+        PostgreSQL (skipping rows that already exist). Callers that load
+        cameras out of the database must pass persist=False — those rows are
+        already there, and re-inserting them raises a UNIQUE constraint error.
         """
         # Add to registry (raises on duplicate)
         self._registry.add(config)
 
         # Persist to database if repository available
-        if self._camera_repo:
+        if self._camera_repo and persist:
             try:
-                await self._camera_repo.create(config)
+                if not await self._camera_repo.exists(config.camera_id):
+                    await self._camera_repo.create(config)
             except Exception as e:
                 logger.warning("[CAMERA-MANAGER] DB persist failed for %s: %s", config.camera_id, e)
 
