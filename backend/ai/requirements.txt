@@ -1,9 +1,12 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 fastapi>=0.115.0
 uvicorn[standard]>=0.34.0
 opencv-python-headless>=4.10.0
 numpy>=1.26.0
 ultralytics>=8.3.0
-torch>=2.5.0
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
+lap>=0.5.12
 easyocr>=1.7.0
 sqlalchemy[asyncio]>=2.0.0
 asyncpg>=0.29.0
