@@ -37,7 +37,36 @@ import {
 } from './mockData';
 
 export const AppInner: React.FC = () => {
-  const { isAuthenticated, isInitializing, demoMode, user, logout, getAuthHeaders, demoLogin } = useAuth();
+  const { token, isAuthenticated, isInitializing, demoMode, user, logout, getAuthHeaders, demoLogin } = useAuth();
+
+  // Most recently committed JWT, readable synchronously. A request that is
+  // already in flight can therefore be retried with a freshly minted token
+  // immediately after a re-login, without waiting for this closure to be
+  // recreated by React.
+  const tokenRef = useRef<string | null>(token);
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
+  // The one screening-session attempt, shared by the periodic retry loop and
+  // the 401 recovery path below. While an attempt is in flight, every other
+  // caller awaits the same promise, so two logins can never run at once.
+  const loginInFlightRef = useRef<Promise<boolean> | null>(null);
+  const establishSession = useCallback((): Promise<boolean> => {
+    if (!loginInFlightRef.current) {
+      loginInFlightRef.current = (async () => {
+        try {
+          const result = await demoLogin();
+          return result.success;
+        } catch {
+          return false;
+        } finally {
+          loginInFlightRef.current = null;
+        }
+      })();
+    }
+    return loginInFlightRef.current;
+  }, [demoLogin]);
 
   // Authenticated fetch helper — includes JWT in all API calls
   const authFetch = useCallback(async (url: string, init?: RequestInit): Promise<Response> => {
@@ -45,8 +74,26 @@ export const AppInner: React.FC = () => {
       ...getAuthHeaders(),
       ...(init?.headers as Record<string, string> || {}),
     };
-    return fetch(url, { ...init, headers });
-  }, [getAuthHeaders]);
+    const res = await fetch(url, { ...init, headers });
+    if (res.status !== 401) return res;
+
+    // 401 means the screening session is missing or has expired (60-minute
+    // TTL). Re-establish it once, wait for AuthContext to publish the new
+    // JWT, then retry this request exactly once. If that retry is also a 401
+    // the response is handed back untouched, so no retry loop is possible.
+    const staleToken = tokenRef.current;
+    if (!(await establishSession())) return res;
+    for (let i = 0; i < 40 && tokenRef.current === staleToken; i += 1) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 25);
+      });
+    }
+    const retryHeaders: Record<string, string> = {
+      ...(tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {}),
+      ...(init?.headers as Record<string, string> || {}),
+    };
+    return fetch(url, { ...init, headers: retryHeaders });
+  }, [getAuthHeaders, establishSession]);
   const [currentPath, setCurrentPath] = useState<NavPath>('command-dashboard');
   const [selectedCameraId, setSelectedCameraId] = useState<string>('');
   const [selectedAlertId, setSelectedAlertId] = useState<string>('ALT-8821');
@@ -226,12 +273,16 @@ export const AppInner: React.FC = () => {
     fetchDashboardStats();
     fetchReports();
     fetchZones();
-    // Periodic refresh for dashboard stats and the alerts list
+    // Periodic refresh for dashboard stats, alerts and the camera list, so a
+    // transient AI/BFF outage recovers on its own instead of leaving the
+    // dashboard empty for the rest of the session.
     const statsInterval = setInterval(fetchDashboardStats, 10000);
     const alertsInterval = setInterval(fetchAlerts, 10000);
+    const camerasInterval = setInterval(fetchCameras, 10000);
     return () => {
       clearInterval(statsInterval);
       clearInterval(alertsInterval);
+      clearInterval(camerasInterval);
     };
   }, [fetchCameras, fetchAlerts, fetchDashboardStats, fetchReports, fetchZones]);
 
@@ -253,22 +304,28 @@ export const AppInner: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // One-time session establishment for the login-page-free entry flow.
+  // Session establishment for the login-page-free entry flow.
   // With the login gate bypassed, nothing else would create the JWT that
   // every existing feature depends on (verifyToken APIs, ADMIN-gated
   // Settings, tokened MJPEG/WS streams). Reuse the EXISTING screening
-  // bypass (demoLogin -> POST /api/auth/screening-login) exactly once when
-  // the app starts unauthenticated — the same real session a manual login
-  // produces, server-gated by SCREENING_MODE=true. No new auth system, no
-  // fake or hardcoded tokens. Runs after AuthContext init so screening
-  // mode's own auto-login is never duplicated, and never re-fires after
-  // an explicit logout.
-  const autoSessionRef = useRef(false);
+  // bypass (demoLogin -> POST /api/auth/screening-login) — the same real
+  // session a manual login produces, server-gated by SCREENING_MODE=true.
+  // No new auth system, no fake or hardcoded tokens, no passwords in the
+  // frontend. Runs only after AuthContext init so screening mode's own
+  // auto-login is never duplicated. Retries every 15s while the app is still
+  // unauthenticated, so a temporary AI/BFF outage can no longer latch the app
+  // into a permanently unauthenticated state, and stops as soon as a session
+  // exists. Attempts go through the shared in-flight guard, so the loop can
+  // never overlap the 401 recovery path in authFetch above.
   useEffect(() => {
-    if (autoSessionRef.current || isInitializing) return;
-    autoSessionRef.current = true;
-    if (!isAuthenticated) void demoLogin();
-  }, [isInitializing, isAuthenticated, demoLogin]);
+    if (isInitializing || isAuthenticated) return;
+    const attempt = () => {
+      void establishSession();
+    };
+    attempt();
+    const sessionRetryTimer = window.setInterval(attempt, 15000);
+    return () => window.clearInterval(sessionRetryTimer);
+  }, [isInitializing, isAuthenticated, establishSession]);
 
   const handleSelectCamera = (id: string) => { setSelectedCameraId(id); setCurrentPath('cameras'); };
   const handleSelectAlert = (id: string) => { setSelectedAlertId(id); setCurrentPath('event-intelligence'); };
