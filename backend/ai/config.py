@@ -1,6 +1,17 @@
 """Centralized configuration for IBVAP AI Service."""
 
 import os
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
+try:
+    import torch
+    torch.set_num_threads(1)
+except Exception:
+    pass
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
